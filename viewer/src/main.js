@@ -1,0 +1,235 @@
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const $ = (s) => document.querySelector(s);
+const MAGIC = 0x4b4f4241;
+
+// ---------------------------------------------------------------- data
+const meta = await (await fetch("/api/meta")).json();
+const pos = new Float32Array(await (await fetch("/api/positions")).arrayBuffer());
+const scIdx = new Uint8Array(await (await fetch("/api/superclass")).arrayBuffer());
+const N = meta.n;
+$("#backend").textContent = `${meta.backend} · ${N.toLocaleString()} cells · ${meta.edges.toLocaleString()} edges`;
+
+// superclass palette (stable order = meta.superclasses)
+const PALETTE = ["#7cc7ff","#ffb86b","#8be28b","#ff7b9c","#c9a2ff","#ffe36b","#6be8d8","#ff9b6b","#a7c4ff","#e6a4ff",
+  "#9be0a0","#ffd0a0","#8ad0ff","#ffa0c0","#c0ffa0","#a0a8ff","#ffc4e0","#b0ffe0","#e0e080","#c0c0c0",
+  "#ff8080","#80ffc0","#c080ff","#80c0ff","#ffc080","#c0ff80","#ff80c0"];
+const scColor = meta.superclasses.map((_, i) => new THREE.Color(PALETTE[i % PALETTE.length]));
+$("#legend").innerHTML = "<b>色 = superclass</b> " + meta.superclasses.map((s, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${s} ${meta.superclass_counts[i].toLocaleString()}</span>`).join(" ");
+
+// ---------------------------------------------------------------- scene
+const canvas = $("#gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07090d);
+const camera = new THREE.PerspectiveCamera(45, 1, 1, 20000);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+
+const geom = new THREE.BufferGeometry();
+geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+const colors = new Float32Array(N * 3);
+for (let i = 0; i < N; i++) { const c = scColor[scIdx[i]]; colors[3*i] = c.r; colors[3*i+1] = c.g; colors[3*i+2] = c.b; }
+geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+const lastSpike = new Float32Array(N).fill(-1e9);   // ms of simulated time
+const lastAttr = new THREE.BufferAttribute(lastSpike, 1); lastAttr.setUsage(THREE.DynamicDrawUsage);
+geom.setAttribute("lastSpike", lastAttr);
+const bbox = new THREE.Box3().setFromBufferAttribute(geom.getAttribute("position"));
+const center = bbox.getCenter(new THREE.Vector3()); controls.target.copy(center);
+const radius = bbox.getBoundingSphere(new THREE.Sphere()).radius;
+function view(kind) {
+  const d = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.95;
+  if (kind === "front") { camera.position.set(center.x, center.y, center.z + d); camera.up.set(0, 1, 0); }
+  if (kind === "top")   { camera.position.set(center.x, center.y + d, center.z + 1); camera.up.set(0, 0, -1); }
+  if (kind === "side")  { camera.position.set(center.x + d, center.y, center.z); camera.up.set(0, 1, 0); }
+  controls.update();
+}
+view("front");
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => view(b.dataset.view));
+
+const mat = new THREE.ShaderMaterial({
+  uniforms: { uNow: { value: 0 }, uTau: { value: 80.0 }, uSize: { value: 2.6 }, uDim: { value: 0.55 } },
+  vertexShader: `
+    attribute float lastSpike; attribute vec3 color;
+    uniform float uNow, uTau, uSize, uDim; varying vec3 vColor; varying float vGlow;
+    void main() {
+      float age = uNow - lastSpike;
+      float g = age < 0.0 ? 0.0 : exp(-age / uTau);
+      vGlow = g; vColor = color;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = (uSize + 7.0 * g) * (600.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    varying vec3 vColor; varying float vGlow; uniform float uDim;
+    void main() {
+      vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard;
+      vec3 c = mix(vColor * uDim, vec3(1.0), vGlow * 0.85) + vColor * vGlow * 0.6;
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+  transparent: false, depthWrite: true,
+});
+const points = new THREE.Points(geom, mat);
+scene.add(points);
+
+function resize() {
+  const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+// ---------------------------------------------------------------- ws
+let simMs = 0, rt = 0, sps = 0, frames = 0, lastFpsT = performance.now();
+const scRate = new Float32Array(meta.superclasses.length);
+const roRate = new Float32Array(meta.readouts.length);
+let retinaLum = new Float32Array(meta.retina);
+const raster = []; // [simMs, neuronIndexInSelection]
+let rasterSet = new Map(meta.readouts.map((r, i) => [r.index, i]));
+let rasterLabel = "readouts";
+const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+let ws;
+function connect() {
+  ws = new WebSocket(wsUrl); ws.binaryType = "arraybuffer";
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === "string") { const m = JSON.parse(ev.data); if (m.op === "state") syncUI(m.state, m.paused); return; }
+    const dv = new DataView(ev.data);
+    if (dv.getUint32(0, true) !== MAGIC) return;
+    simMs = dv.getFloat32(4, true); rt = dv.getFloat32(8, true);
+    const total = dv.getUint32(12, true), nIds = dv.getUint32(16, true), nSc = dv.getUint32(20, true), nRo = dv.getUint32(24, true), nRet = dv.getUint32(28, true);
+    let o = 32;
+    const ids = new Uint32Array(ev.data, o, nIds); o += nIds * 4;
+    scRate.set(new Float32Array(ev.data, o, nSc)); o += nSc * 4;
+    roRate.set(new Float32Array(ev.data, o, nRo)); o += nRo * 4;
+    retinaLum = new Float32Array(ev.data, o, nRet);
+    for (let k = 0; k < nIds; k++) {
+      const i = ids[k]; lastSpike[i] = simMs;
+      const r = rasterSet.get(i); if (r !== undefined) raster.push(simMs, r);
+    }
+    if (nIds) lastAttr.needsUpdate = true;
+    sps = 0.8 * sps + 0.2 * (total / (meta.frame_ms / 1000));
+    while (raster.length > 60000) raster.splice(0, 2);
+  };
+  ws.onopen = () => { while (pending.length) ws.send(JSON.stringify(pending.shift())); };
+  ws.onclose = () => setTimeout(connect, 1000);
+}
+connect();
+const pending = [];
+const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); else pending.push(o); };
+
+// ---------------------------------------------------------------- UI
+const state = { gain: 1, sugar: false, visual: "off", orn: {}, buttons: {}, custom: [] };
+function stim(patch) { Object.assign(state, patch); send({ op: "stim", patch }); syncUI(state); }
+function syncUI(s, paused) {
+  Object.assign(state, s);
+  document.querySelectorAll("[data-toggle]").forEach(b => b.classList.toggle("on", !!state[b.dataset.toggle]));
+  document.querySelectorAll("[data-visual]").forEach(b => b.classList.toggle("on", state.visual === b.dataset.visual));
+  document.querySelectorAll("[data-button]").forEach(b => b.classList.toggle("on", !!(state.buttons || {})[b.dataset.button]));
+  document.querySelectorAll("[data-orn]").forEach(b => b.classList.toggle("on", !!(state.orn || {})[b.dataset.orn]));
+  $("#gain").value = state.gain; $("#gainv").textContent = Number(state.gain).toFixed(2);
+  if (paused !== undefined) $("#pause").classList.toggle("on", paused);
+}
+$("#gain").oninput = (e) => stim({ gain: +e.target.value });
+document.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => stim({ [b.dataset.toggle]: !state[b.dataset.toggle] }));
+document.querySelectorAll("[data-visual]").forEach(b => b.onclick = () => stim({ visual: b.dataset.visual }));
+let paused = false;
+$("#pause").onclick = () => { paused = !paused; send({ op: "pause", value: paused }); $("#pause").classList.toggle("on", paused); };
+$("#reset").onclick = () => { send({ op: "reset" }); lastSpike.fill(-1e9); lastAttr.needsUpdate = true; raster.length = 0; };
+$("#btnhelp").textContent = Object.entries(meta.buttons).map(([k, v]) => `${k}: ${v}`).join(" / ");
+for (const [name, desc] of Object.entries(meta.buttons)) {
+  const b = document.createElement("button"); b.textContent = name; b.title = desc; b.dataset.button = name;
+  b.onclick = () => stim({ buttons: { ...state.buttons, [name]: !(state.buttons || {})[name] } });
+  $("#buttons").appendChild(b);
+}
+for (const [g, n] of Object.entries(meta.orn)) {
+  const b = document.createElement("button"); b.textContent = g; b.title = `${n} ORNs`; b.dataset.orn = g;
+  b.onclick = () => stim({ orn: { ...state.orn, [g]: !(state.orn || {})[g] } });
+  $("#orn").appendChild(b);
+}
+$("#inject").onclick = async () => {
+  const glob = $("#glob").value.trim(); if (!glob) return;
+  const r = await (await fetch(`/api/search?q=${encodeURIComponent(glob)}`)).json();
+  $("#globinfo").textContent = `${r.n} cells: ` + r.types.slice(0, 12).map(t => `${t.type}×${t.n}`).join(" ");
+  stim({ custom: [...state.custom.filter(c => c.glob !== glob), { glob, amp: +$("#amp").value }] });
+  if (r.ids.length) { rasterSet = new Map(r.ids.slice(0, 200).map((i, k) => [i, k])); rasterLabel = glob; raster.length = 0; }
+};
+$("#clear").onclick = () => { stim({ custom: [] }); rasterSet = new Map(meta.readouts.map((r, i) => [r.index, i])); rasterLabel = "readouts"; raster.length = 0; };
+
+// bars
+const scBars = meta.superclasses.map((s, i) => {
+  const d = document.createElement("div"); d.className = "bar";
+  d.innerHTML = `<span title="${meta.superclass_counts[i]} cells" style="color:${PALETTE[i % PALETTE.length]}">${s}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
+  $("#scbars").appendChild(d); return d;
+});
+const roBars = meta.readouts.map((r) => {
+  const d = document.createElement("div"); d.className = "bar";
+  d.innerHTML = `<span>${r.type} ${r.side}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
+  $("#readouts").appendChild(d); return d;
+});
+
+// retina map
+const rc = $("#retina").getContext("2d");
+const uv = meta.uv;
+function drawRetina() {
+  rc.fillStyle = "#000"; rc.fillRect(0, 0, 240, 120);
+  for (let i = 0; i < meta.retina; i++) {
+    const l = retinaLum[i] || 0; if (l <= 0) continue;
+    rc.fillStyle = `rgba(255,230,120,${0.25 + 0.75 * l})`;
+    rc.fillRect(uv[2*i] * 238, uv[2*i+1] * 118, 2, 2);
+  }
+  rc.strokeStyle = "#2b3648"; rc.beginPath(); rc.moveTo(120, 0); rc.lineTo(120, 120); rc.stroke();
+}
+// raster
+const rr = $("#raster").getContext("2d");
+function drawRaster() {
+  rr.fillStyle = "#000"; rr.fillRect(0, 0, 360, 160);
+  const win = 2000, t0 = simMs - win, rows = Math.max(1, rasterSet.size);
+  rr.fillStyle = "#9ad7ff";
+  for (let k = 0; k < raster.length; k += 2) {
+    const t = raster[k]; if (t < t0) continue;
+    rr.fillRect((t - t0) / win * 360, raster[k+1] / rows * 158, 1.5, Math.max(1, 158 / rows - 1));
+  }
+  $("#rasterinfo").textContent = `${rasterLabel} (${rasterSet.size} cells, 2 s)`;
+}
+
+// click -> nearest projected point
+const proj = new THREE.Vector3();
+canvas.addEventListener("pointerdown", (e) => { canvas._down = [e.clientX, e.clientY]; });
+canvas.addEventListener("pointerup", async (e) => {
+  const d = canvas._down; if (!d || Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 4) return;
+  const x = (e.clientX / innerWidth) * 2 - 1, y = -(e.clientY / innerHeight) * 2 + 1;
+  let best = -1, bestD = 0.02 * 0.02;
+  for (let i = 0; i < N; i++) {
+    proj.set(pos[3*i], pos[3*i+1], pos[3*i+2]).project(camera);
+    if (proj.z > 1) continue;
+    const dd = (proj.x - x) ** 2 + ((proj.y - y) * innerHeight / innerWidth) ** 2;
+    if (dd < bestD) { bestD = dd; best = i; }
+  }
+  if (best < 0) return;
+  const c = await (await fetch(`/api/cell/${best}`)).json();
+  $("#cellinfo").innerHTML = `<b>${c.type || "(untyped)"}</b> ${c.side} · ${c.superclass}<br>bodyId ${c.bodyId} · nt ${c.nt || "?"} (${c.sign > 0 ? "+" : "−"})<br>out ${c.out_degree} · in ${c.in_degree} · ${c.rate_hz.toFixed(1)} Hz · soma ${c.measured_soma ? "measured" : "estimated"}`;
+  rasterSet = new Map([[best, 0]]); rasterLabel = c.type || String(best); raster.length = 0;
+});
+
+// ---------------------------------------------------------------- loop
+function tick() {
+  requestAnimationFrame(tick);
+  controls.update();
+  mat.uniforms.uNow.value = simMs;
+  renderer.render(scene, camera);
+  frames++;
+  const now = performance.now();
+  if (now - lastFpsT > 500) {
+    $("#fps").textContent = Math.round(frames * 1000 / (now - lastFpsT)); frames = 0; lastFpsT = now;
+    $("#simt").textContent = (simMs / 1000).toFixed(2); $("#rt").textContent = rt.toFixed(3); $("#sps").textContent = Math.round(sps).toLocaleString();
+    const scMax = Math.max(1, ...scRate);
+    scBars.forEach((d, i) => { d.querySelector(".fill").style.width = `${100 * scRate[i] / scMax}%`; d.querySelector(".val").textContent = scRate[i].toFixed(2); });
+    const roMax = Math.max(5, ...roRate);
+    roBars.forEach((d, i) => { d.querySelector(".fill").style.width = `${100 * roRate[i] / roMax}%`; d.querySelector(".val").textContent = roRate[i].toFixed(1); });
+    drawRetina(); drawRaster();
+  }
+}
+tick();

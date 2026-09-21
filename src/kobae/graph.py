@@ -200,7 +200,15 @@ def build(data_dir: Path, out: Path, verify: bool = True) -> dict:
           f"readouts {len(readouts)}")
 
     soma = _soma_xyz(a_idx)
-    print(f"[graph] soma positions for {int(np.isfinite(soma[:, 0]).sum())} neurons")
+    tosoma = np.full((n, 3), np.nan, dtype=np.float32)
+    if "tosomaLocation" in a_idx.columns:
+        for i, v in enumerate(a_idx.tosomaLocation.to_numpy(dtype=object)):
+            if v is not None and len(v) == 3:
+                tosoma[i] = [float(v[0]), float(v[1]), float(v[2])]
+    print(f"[graph] soma positions for {int(np.isfinite(soma[:, 0]).sum())} neurons "
+          f"(+{int(np.isfinite(tosoma[:, 0]).sum())} tosoma)")
+    receptor_type = a_idx.receptorType.fillna("").astype(str).to_numpy() if "receptorType" in a_idx.columns else np.full(n, "", dtype=object)
+    fru_dsx = a_idx.fruDsx.fillna("").astype(str).to_numpy() if "fruDsx" in a_idx.columns else np.full(n, "", dtype=object)
 
     superclass = nodes.superclass.fillna("unassigned").astype(str).to_numpy()
     orn = np.flatnonzero(np.char.startswith(ctype.astype(str), "ORN_")).astype(np.int32)
@@ -224,7 +232,8 @@ def build(data_dir: Path, out: Path, verify: bool = True) -> dict:
              superclass=superclass.astype("U64"), cell_type=ctype.astype("U64"),
              soma_side=np.asarray(soma_side, dtype="U8"),
              neurotransmitter=predicted.fillna("").astype(str).to_numpy().astype("U64"),
-             sign=sign, soma=soma)
+             sign=sign, soma=soma, tosoma=tosoma,
+             receptor_type=np.asarray(receptor_type, dtype="U32"), fru_dsx=np.asarray(fru_dsx, dtype="U32"))
     out.with_suffix(".json").write_text(json.dumps(meta, indent=1) + "\n")
     print(f"[graph] wrote {out} ({out.stat().st_size / 1e6:.0f} MB) in {time.time() - t0:.0f}s")
     return meta
