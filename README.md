@@ -118,7 +118,10 @@ uv run python -m kobae_body.loop --brain ws://<gpu-host>:8765/ws --wpg ../data/f
 - 脳 → 体: 下行ニューロンの発火率を DoomFly と同じ流儀で操舵に変換（DNa02 の左右差 → 旋回、DNp09 → 前進、MDN → 後退）。工学的な写像で、生物学的な対応の主張ではない
 - 体 → 脳: ハエの目のカメラ画像を R1-R6 の uv マップでサンプリングして輝度にし、`retina` op で脳に送る（脳側は `visual = "external"`）
 - ビューアの右パネルにカメラ画像と上から見た飛行経路が出る
-- 体の物理は dt 0.2 ms、実時間の 100 倍程度かかる（MuJoCo + 翅 + 流体モデル）。flybody の task が毎ステップ mjcf を辿る実装だったので、参照配列の in-place 拡張と mujoco 配列への直接書き込みで 1 エピソードを無限に続ける形に変えた
+- 体の物理は dt 0.2 ms。flybody の task は毎セグメント mjcf を再コンパイル（0.4 s）し毎ステップ mjcf を辿る実装で実時間の 100 倍かかったので、参照配列の in-place 拡張と mujoco 配列への直接書き込みで 1 エピソードを無限に続ける形に変え、**20〜24 倍**まで下げた。閉ループの律速は体（脳は 1× 目標で待っている）
+- ポリシーの再実装で踏んだ罠: Acme の `LayerNormMLP` は最初の層だけ LayerNorm + tanh で残りは **ELU**、DMPO の head は `tanh_mean=False`（tanh なし、環境側で [-1,1] にクリップ）、観測 dict は `tree.flatten` で **キーのソート順**に連結。この 3 つを合わせるまで飛ばなかった
+- 純粋な視覚入力では DNa02 / DNp09 / MDN（歩行の「生物学的」読み出し）は沈黙する（DoomFly の報告と同じ）。既定の読み出しは DoomFly の BCI モード（DNp20 の左右差 → 旋回、DNpe017 → 前進）。`--mode biological` で切替
+- 最初の閉ループ 10 s（`docs/kobae-closed-loop.mp4`、3 倍速）: 右の DNp20 が常に強く（L/R ≈ 16/26 Hz）右旋回し続けて円を描いた。左右の目の映像に自分の体が非対称に映り込むためか、視覚回路の左右非対称かは未検証
 
 ## 既知の制限
 
