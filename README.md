@@ -104,6 +104,22 @@ data/, outputs/ 生データと生成物（git 管理外）
 body/           flybody（MuJoCo）の体と飛行ポリシー（別 uv プロジェクト、Python 3.12）
 ```
 
+## 体（`body/`、段階 3）
+
+flybody（Google DeepMind / Janelia、Apache-2.0）の MuJoCo の体と学習済み飛行ポリシーを使う。別の uv プロジェクト（Python 3.12、TensorFlow は重みの抽出にだけ使う）。
+
+```sh
+cd body && uv sync
+uv run python -m kobae_body.extract_policy ../data/flybody/policies/flight policies/flight.npz   # TF SavedModel -> numpy
+uv run python -m kobae_body.loop --brain ws://<gpu-host>:8765/ws --wpg ../data/flybody/wing_pattern_fmech.npy -v
+```
+
+- 飛行ポリシー（obs 104 → 256×3 → 12 action、LayerNorm MLP）は翅の拍動パターン生成器と組み合わせて参照軌道を追従する。参照軌道は録画ではなく**指令**（前進速度・旋回角速度・上昇）から逐次生成する
+- 脳 → 体: 下行ニューロンの発火率を DoomFly と同じ流儀で操舵に変換（DNa02 の左右差 → 旋回、DNp09 → 前進、MDN → 後退）。工学的な写像で、生物学的な対応の主張ではない
+- 体 → 脳: ハエの目のカメラ画像を R1-R6 の uv マップでサンプリングして輝度にし、`retina` op で脳に送る（脳側は `visual = "external"`）
+- ビューアの右パネルにカメラ画像と上から見た飛行経路が出る
+- 体の物理は dt 0.2 ms、実時間の 100 倍程度かかる（MuJoCo + 翅 + 流体モデル）。flybody の task が毎ステップ mjcf を辿る実装だったので、参照配列の in-place 拡張と mujoco 配列への直接書き込みで 1 エピソードを無限に続ける形に変えた
+
 ## 既知の制限
 
 - 視葉（光受容体・ラミナ・メダラ、全体の 6 割）は実際には段階的電位で信号を送るが、現状は全細胞 LIF。段階 2 で CSC（入辺）を使う pull 型カーネルとして graded 化する予定（DESIGN.md）
