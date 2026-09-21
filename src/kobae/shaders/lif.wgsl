@@ -84,7 +84,7 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
         c = c + 1u;
         let packed = (i << 5u) | s;
         let k = atomicAdd(&ctl[0], 1u);
-        deliver[k] = packed;                       // k < n is guaranteed (one spike per neuron per batch)
+        if (k < P.n) { deliver[k] = packed; }      // k < n by design (one spike per neuron per batch); guard anyway
         let h = atomicAdd(&ctl[4], 1u);
         if (h < P.ring_cap) { ring[h] = vec2<u32>(batch, packed); } else { atomicStore(&ctl[5], 1u); }
       }
@@ -122,7 +122,9 @@ fn graded_gather(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(1)
 fn prep() {
-  let cnt = atomicLoad(&ctl[0]);
+  // deliver[] has capacity n; a corrupted/overflowed count must never dispatch more than that
+  let cnt = min(atomicLoad(&ctl[0]), P.n);
+  atomicStore(&ctl[0], cnt);
   indirect[0] = min(cnt, 65535u);
   indirect[1] = (cnt + 65534u) / 65535u;
   indirect[2] = 1u;

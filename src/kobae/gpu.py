@@ -12,6 +12,12 @@ from . import model as M
 
 SHADER = Path(__file__).parent / "shaders" / "lif.wgsl"
 META_WORDS = 8
+# Never let one command buffer run long: amdgpu resets the GPU when a single job exceeds its
+# ring timeout (~10 s; on 2026-09-21 a 1111-batch submit with the graded gather did exactly
+# that on the RX 580 and took the desktop down). Submits are chunked and each chunk is waited
+# on; the chunk size adapts so a submit stays around SUBMIT_TARGET_S.
+MAX_BATCHES_PER_SUBMIT = 50
+SUBMIT_TARGET_S = 0.25
 
 
 
@@ -122,6 +128,7 @@ class GpuBrain:
         self.total_spikes = 0
         self._wall = 0.0
         self._ring_base = 0  # ring entries already consumed (host side)
+        self.chunk = 8       # batches per submit, adapted from measured submit time
         self.reset_state()
 
     # ---- state -----------------------------------------------------------
@@ -147,9 +154,7 @@ class GpuBrain:
         self.device.queue.write_buffer(self.b_drive, 0, drive)
 
     # ---- stepping --------------------------------------------------------
-    def run(self, batches: int, sync: bool = True) -> float:
-        """Encode+submit ``batches`` (each 18 steps). Returns wall seconds (exact only with sync)."""
-        t = time.perf_counter()
+    def _submit(self, batches: int):
         enc = self.device.create_command_encoder()
         cp = enc.begin_compute_pass()
         cp.set_bind_group(0, self.bind_group)
@@ -168,8 +173,24 @@ class GpuBrain:
             cp.dispatch_workgroups(1, 1, 1)
         cp.end()
         self.device.queue.submit([enc.finish()])
-        if sync:
-            self.device.queue.read_buffer(self.b_meta, 0, 4)  # blocks until the queue drains
+        self.device.queue.read_buffer(self.b_meta, 0, 4)  # blocks until this submit has completed
+
+    def run(self, batches: int, sync: bool = True) -> float:
+        """Advance ``batches`` (each 18 steps) in bounded submits. Returns wall seconds.
+
+        ``sync`` is accepted for API compatibility; every chunk is always waited on."""
+        t = time.perf_counter()
+        done = 0
+        while done < batches:
+            k = min(self.chunk, batches - done)
+            t0 = time.perf_counter()
+            self._submit(k)
+            dt = time.perf_counter() - t0
+            done += k
+            # adapt: aim for SUBMIT_TARGET_S per submit, never above the hard cap
+            if dt > 0:
+                est = int(k * SUBMIT_TARGET_S / dt)
+                self.chunk = int(np.clip(est, 1, MAX_BATCHES_PER_SUBMIT))
         el = time.perf_counter() - t
         self.sim_steps += batches * M.DELAY_STEPS
         self._wall += el
