@@ -162,6 +162,12 @@ def build(data_dir: Path, out: Path, verify: bool = True) -> dict:
     count = count[order]
     weight = (count.astype(np.float32) * sign[pre[order]] * CONTACT_GAIN_MV).astype(np.float32)
     E = len(post)
+    # CSC (incoming edges per neuron) for the pull-type graded pathway (DESIGN.md stage 2):
+    # for each post cell, the list of (pre, weight) in a fixed order -> deterministic sums
+    order_in = np.argsort(post, kind="stable")
+    cptr = np.r_[0, np.cumsum(np.bincount(post, minlength=n))].astype(np.int64)
+    cpre = pre[order][order_in].astype(np.int32)
+    cweight = weight[order_in].astype(np.float32)
     print(f"[graph] {E} retained edges of {src_rows} rows, {int(count.sum(dtype=np.uint64))} contacts "
           f"of {src_contacts}; self edges {int(np.count_nonzero(pre[order] == post))} ({time.time() - t0:.0f}s)")
 
@@ -226,7 +232,7 @@ def build(data_dir: Path, out: Path, verify: bool = True) -> dict:
                   "weight = count*sign*0.275 mV; retina R1-R6 modal L1/L2/L3 hex column; lamina L1/L2/L3/L5; sugar LB3c",
     }
     out.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(out, ptr=ptr, post=post, weight=weight, count=count,
+    np.savez(out, ptr=ptr, post=post, weight=weight, count=count, cptr=cptr, cpre=cpre, cweight=cweight,
              ids=ids.astype(np.int64), retina=indices, uv=uv.astype(np.float32),
              confidence=np.asarray(confidence, dtype=np.float32), lamina=lamina, sugar=sugar, orn=orn,
              superclass=superclass.astype("U64"), cell_type=ctype.astype("U64"),
