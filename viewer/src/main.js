@@ -97,11 +97,11 @@ for (const [name, p] of Object.entries(meta.landmarks || {})) {
 }
 
 function resize() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const box = canvas.parentElement.getBoundingClientRect();
+  const w = Math.max(1, Math.round(box.width)), h = Math.max(1, Math.round(box.height));
   renderer.setSize(w, h, false);
   labelRenderer.setSize(w, h);
-  const r = canvas.getBoundingClientRect();
-  Object.assign(labelRenderer.domElement.style, { position: "absolute", left: r.left + "px", top: r.top + "px", pointerEvents: "none" });
+  Object.assign(labelRenderer.domElement.style, { position: "absolute", left: box.left + "px", top: box.top + "px", pointerEvents: "none" });
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 addEventListener("resize", resize); resize(); view("front");
@@ -141,7 +141,7 @@ function connect() {
       const i = ids[k]; lastSpike[i] = simMs;
       const r = rasterSet.get(i); if (r !== undefined) raster.push(simMs, r);
     }
-    if (nIds && mode !== "flight") lastAttr.needsUpdate = true;
+    if (nIds) lastAttr.needsUpdate = true;
     sps = 0.8 * sps + 0.2 * (total / Math.max(frameSimS, 1e-6));
     while (raster.length > 60000) raster.splice(0, 2);
   };
@@ -262,8 +262,15 @@ const path = [];
 let mode = "brain", bodySeen = false;
 function setMode(m) {
   mode = m;
-  $("#flight").hidden = m !== "flight"; $("#gl").style.visibility = m === "flight" ? "hidden" : "visible";
+  $("#flight").hidden = m !== "flight";
+  $("#brainmini").hidden = m !== "flight";
+  $("#bodysec").hidden = m === "flight" || !bodySeen;
+  // in flight mode the 3D map moves into the right panel (same canvas, re-parented) and the
+  // in-scene labels are hidden (they would float over the flight view)
+  (m === "flight" ? $("#brainminibox") : $("#stage")).appendChild(canvas);
+  labelRenderer.domElement.style.display = m === "flight" ? "none" : "";
   document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  resize();
 }
 document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
 function drawPath(canvas, m, W, H) {
@@ -294,8 +301,8 @@ function onBodyBinary(buf, dv) {
 function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
   if (!bodySeen) { bodySeen = true; setMode("flight"); }
-  if (m.chaseUrl) { if (mode === "flight") $("#chase").src = m.chaseUrl; else $("#bodycam").src = m.chaseUrl; }
-  if (m.eyesUrl) { if (mode === "flight") $("#eyesbig").src = m.eyesUrl; else $("#bodyeyes").src = m.eyesUrl; }
+  if (m.chaseUrl) { $("#chase").src = m.chaseUrl; $("#bodycam").src = m.chaseUrl; }
+  if (m.eyesUrl) { $("#eyesbig").src = m.eyesUrl; $("#bodyeyes").src = m.eyesUrl; }
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
   drawPath($("#bodypath"), m, 360, 200); drawPath($("#minimap"), m, 220, 160);
   if (m.cmd) {
@@ -307,12 +314,10 @@ function onBody(m) {
 // ---------------------------------------------------------------- loop
 function tick() {
   requestAnimationFrame(tick);
-  if (mode !== "flight") {          // the point cloud is hidden in flight mode: do not render it
-    controls.update();
-    mat.uniforms.uNow.value = simMs;
-    renderer.render(scene, camera);
-    labelRenderer.render(scene, camera);
-  }
+  controls.update();
+  mat.uniforms.uNow.value = simMs;
+  renderer.render(scene, camera);
+  if (mode !== "flight") labelRenderer.render(scene, camera);
   frames++;
   const now = performance.now();
   if (now - lastFpsT > 500) {
