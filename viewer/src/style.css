@@ -4,8 +4,9 @@ html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:
 #stage { position:relative; min-width:0; height:100%; }
 #gl { display:block; width:100%; height:100%; border-radius:8px; background:#07090d; min-width:0; }
 #flight { position:absolute; inset:0; border-radius:8px; background:#000; overflow:hidden; }
-#chase { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
-#eyesbig { position:absolute; left:12px; top:12px; width:34%; border:1px solid #2b3648; border-radius:4px; background:#000; }
+#fly { position:absolute; inset:0; width:100%; height:100%; display:block; }
+#flightviews { position:absolute; right:12px; top:78px; z-index:5; } #flightviews button { padding:2px 8px; font-size:11px; }
+#eyesbig { position:absolute; left:12px; bottom:52px; width:30%; border:1px solid #2b3648; border-radius:4px; background:#000; }
 #minimap { position:absolute; right:12px; bottom:12px; background:rgba(0,0,0,.6); border:1px solid #2b3648; border-radius:4px; }
 #flighthud { position:absolute; left:12px; bottom:12px; background:rgba(7,9,13,.6); padding:4px 8px; border-radius:4px; font-size:12px; }
 #modes { margin-left:14px; } #modes button { padding:2px 9px; font-size:11px; }

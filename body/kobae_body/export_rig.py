@@ -28,11 +28,12 @@ def main(out: str, target_tris: int = 900):
         if gname.startswith("ghost") or m.geom_group[g] > 2:      # hide ghost and collision-only groups
             continue
         typ = int(m.geom_type[g])
-        rgba = [round(float(x), 3) for x in m.geom_rgba[g]]
+        mat = int(m.geom_matid[g])
+        rgba = [round(float(x), 3) for x in (m.mat_rgba[mat] if mat >= 0 else m.geom_rgba[g])]
         if rgba[3] == 0:
             continue
         entry = {"body": int(m.body_parentid[m.geom_bodyid[g]]) if False else int(m.geom_bodyid[g]), "name": gname,
-                 "color": rgba[:3], "pos": [round(float(x), 5) for x in m.geom_pos[g]],
+                 "color": rgba, "pos": [round(float(x), 5) for x in m.geom_pos[g]],
                  "quat": [round(float(x), 5) for x in m.geom_quat[g]], "type": typ,
                  "size": [round(float(x), 5) for x in m.geom_size[g]]}
         if typ == mujoco.mjtGeom.mjGEOM_MESH:

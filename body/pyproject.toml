@@ -1,3 +1,4 @@
+# TensorFlow is only needed to extract the policy weights (extract_policy.py): uv sync --extra extract
 [project]
 name = "kobae-body"
 version = "0.1.0"
@@ -8,7 +9,6 @@ dependencies = [
   "dm_control>=1.0.46",
   "numpy",
   "flybody @ file:///home/sksat/prog/kobae/body/vendor/flybody-main",
-  "tensorflow-cpu",
   "websockets",
   "pillow",
   "mediapy",
@@ -16,3 +16,6 @@ dependencies = [
   "trimesh",
   "fast-simplification",
 ]
+
+[project.optional-dependencies]
+extract = ["tensorflow-cpu"]

@@ -51,8 +51,9 @@
   <div id="stage">
     <canvas id="gl"></canvas>
     <div id="flight" hidden>
-      <img id="chase" alt="chase camera">
+      <canvas id="fly"></canvas>
       <div id="flighthud"><span id="flightinfo"></span></div>
+      <div id="flightviews" class="btns"><button data-fview="chase">追いかけ</button><button data-fview="top">上から</button><button data-fview="side">横から</button><button data-fview="wide">引き</button></div>
       <img id="eyesbig" alt="eyes">
       <canvas id="minimap" width="220" height="160"></canvas>
     </div>

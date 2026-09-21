@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+import { createFlightView } from "./flight.js";
 
 const $ = (s) => document.querySelector(s);
 const MAGIC = 0x4b4f4241;
@@ -105,7 +106,7 @@ function resize() {
   Object.assign(labelRenderer.domElement.style, { position: "absolute", left: "0px", top: "0px", pointerEvents: "none" });
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-addEventListener("resize", resize); resize(); view("front");
+addEventListener("resize", () => { resize(); if (flight) flight.resize(); }); resize(); view("front");
 
 // ---------------------------------------------------------------- ws
 let simMs = 0, rt = 0, sps = 0, frames = 0, lastFpsT = performance.now();
@@ -128,7 +129,7 @@ function connect() {
     }
     const dv = new DataView(ev.data);
     const magic = dv.getUint32(0, true);
-    if (magic === 0x42424f4b) { onBodyBinary(ev.data, dv); return; }   // 'KOBB'
+    if (magic === 0x42424f4b || magic === 0x50424f4b) { onBodyBinary(ev.data, dv); return; }   // 'KOBB' / 'KOBP'
     if (magic !== MAGIC) return;
     simMs = dv.getFloat32(4, true); rt = dv.getFloat32(8, true);
     const total = dv.getUint32(12, true), nIds = dv.getUint32(16, true), nSc = dv.getUint32(20, true), nRo = dv.getUint32(24, true), nRet = dv.getUint32(28, true);
@@ -272,6 +273,7 @@ function setMode(m) {
   labelRenderer.domElement.style.display = m === "flight" ? "none" : "";
   document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
   resize();
+  if (flight) flight.resize();
 }
 document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
 function drawPath(canvas, m, W, H) {
@@ -289,9 +291,29 @@ function drawPath(canvas, m, W, H) {
   c.fillStyle = "#cfd6e2"; c.font = "10px ui-monospace"; c.fillText(`飛行経路 ${span.toFixed(0)} cm`, 6, H - 6);
 }
 let chaseUrl = null, eyesUrl = null;
+let flight = null;   // three.js flight view, created lazily on the first pose frame
+async function ensureFlight() {
+  if (flight) return flight;
+  flight = await createFlightView($("#fly"));
+  document.querySelectorAll("[data-fview]").forEach(b => b.onclick = () => flight.views[b.dataset.fview]());
+  flight.resize();
+  return flight;
+}
 function onBodyBinary(buf, dv) {
+  const magic = dv.getUint32(0, true);
   const t = dv.getFloat32(4, true), pos = [dv.getFloat32(8, true), dv.getFloat32(12, true), dv.getFloat32(16, true)];
   const yaw = dv.getFloat32(20, true), cmd = [dv.getFloat32(24, true), dv.getFloat32(28, true)];
+  if (magic === 0x50424f4b) {   // 'KOBP': poses + eyes
+    const nb = dv.getUint32(32, true), el = dv.getUint32(36, true);
+    const ids = new Uint16Array(buf, 40, nb);
+    const poses = new Float32Array(nb * 7);
+    poses.set(new Float32Array(buf.slice(40 + nb * 2, 40 + nb * 2 + nb * 28)));
+    const eyes = new Blob([new Uint8Array(buf, 40 + nb * 2 + nb * 28, el)], { type: "image/jpeg" });
+    if (eyesUrl) URL.revokeObjectURL(eyesUrl); eyesUrl = URL.createObjectURL(eyes);
+    ensureFlight().then(f => f.applyPoses(ids, poses));
+    onBody({ t, pos, yaw, cmd, eyesUrl });
+    return;
+  }
   const jl = dv.getUint32(32, true), el = dv.getUint32(36, true);
   const jpeg = new Blob([new Uint8Array(buf, 40, jl)], { type: "image/jpeg" });
   const eyes = new Blob([new Uint8Array(buf, 40 + jl, el)], { type: "image/jpeg" });
@@ -302,7 +324,7 @@ function onBodyBinary(buf, dv) {
 function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
   if (!bodySeen) { bodySeen = true; setMode("flight"); }
-  if (m.chaseUrl) { $("#chase").src = m.chaseUrl; $("#bodycam").src = m.chaseUrl; }
+  if (m.chaseUrl) { $("#bodycam").src = m.chaseUrl; }
   if (m.eyesUrl) { $("#eyesbig").src = m.eyesUrl; $("#bodyeyes").src = m.eyesUrl; }
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
   drawPath($("#bodypath"), m, 360, 200); drawPath($("#minimap"), m, 220, 160);
@@ -323,6 +345,7 @@ function tick(now) {
   mat.uniforms.uNow.value = simMs;
   renderer.render(scene, camera);
   if (mode !== "flight") labelRenderer.render(scene, camera);
+  if (mode === "flight" && flight) flight.render();
   frames++;
   if (now - lastFpsT > 500) {
     $("#fps").textContent = Math.round(frames * 1000 / (now - lastFpsT)); frames = 0; lastFpsT = now;

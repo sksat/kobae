@@ -134,9 +134,8 @@ class FlightBody:
         self.wall = 0.0
         self.buffer_s = buffer_s
         self.relaunches = 0
-        self._launch()
-        self._renderer = None
         self._eye_cams = None
+        self._launch()
 
     def _launch(self):
         """(Re)start an episode: compiles the model, installs the long reference buffers and the fast hooks."""
@@ -151,6 +150,11 @@ class FlightBody:
         self._patch_before_step()
         self._hide_helpers()
         self._extend(self.horizon + self.future + 2)
+        # kinematic mode: resolve the root free joint and wing joints once per (re)launch
+        rj = self.physics.bind(mjcf.get_frame_freejoint(task._walker.mjcf_model))
+        self._root_q, self._root_v = int(rj.qposadr), int(rj.dofadr)
+        self._wing_q = np.asarray(self.physics.bind(task._wing_joints).qposadr)
+        self._renderer = None   # the model may have been recompiled
 
     def _hide_helpers(self):
         """The ghost fly, trajectory dots and crosshair are visualisation aids: keep them out of the eyes."""
@@ -275,9 +279,17 @@ class FlightBody:
         if self._renderer is None or self._renderer.width != width:
             self._renderer = mujoco.Renderer(self.physics.model.ptr, height=height, width=width)
             self._eye_cams = [mujoco.mj_name2id(self.physics.model.ptr, mujoco.mjtObj.mjOBJ_CAMERA, c) for c in EYE_CAMERAS]
+            # shadows and reflections cost ~25 ms per render on these GPUs; the eyes do not need them.
+            # The fly's own body (geom groups 1,3,4,5) is hidden from its eyes as well.
+            for fl in (mujoco.mjtRndFlag.mjRND_SHADOW, mujoco.mjtRndFlag.mjRND_REFLECTION, mujoco.mjtRndFlag.mjRND_SKYBOX,
+                       mujoco.mjtRndFlag.mjRND_FOG, mujoco.mjtRndFlag.mjRND_HAZE):
+                self._renderer.scene.flags[fl] = False
+            self._eye_opt = mujoco.MjvOption()
+            for gi in (1, 3, 4, 5):
+                self._eye_opt.geomgroup[gi] = 0
         out = []
         for c in self._eye_cams:
-            self._renderer.update_scene(self.physics.data.ptr, camera=c)
+            self._renderer.update_scene(self.physics.data.ptr, camera=c, scene_option=self._eye_opt)
             out.append(self._renderer.render().copy())
         return tuple(out)
 
