@@ -1,0 +1,9 @@
+data/
+*.npz
+*.feather
+*.arrow
+*.parquet
+*.bin
+.venv/
+__pycache__/
+outputs/
