@@ -7,7 +7,9 @@ Endpoints
   GET  /api/superclass        binary uint8 [n] superclass index
   GET  /api/cell/<i>          JSON: info about one cell
   GET  /api/search?q=glob     JSON: cell types matching a glob (count per type)
-  WS   /ws                    server -> client binary frames; client -> server JSON commands
+  WS   /ws                    server -> client binary frames; client -> server JSON commands:
+                              {op:stim, patch}, {op:speed, value}, {op:pause, value}, {op:reset},
+                              {op:retina, lum:[..]} (body -> brain), {op:readouts} -> {op:readouts, rates}
 
 Frame (binary, little endian):
   u32 magic 0x4B4F4241 ('KOBA'), f32 sim_ms, f32 realtime_x, u32 total_spikes_in_frame,
@@ -84,7 +86,7 @@ class Engine(threading.Thread):
                 time.sleep(0.05); continue
             t0 = time.perf_counter()
             with self.lock:
-                vis_dyn = self.stim.state.get("visual") in ("flash", "bar", "grating", "loom")
+                vis_dyn = self.stim.state.get("visual") in ("flash", "bar", "grating", "loom", "external")
                 if self._dirty or (vis_dyn and self.sim_ms - self._last_stim_t >= 18.0):
                     b.set_drive(self.stim.drive(self.sim_ms / 1000.0))
                     self._dirty = False; self._last_stim_t = self.sim_ms
@@ -202,6 +204,19 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                         engine.apply(cmd.get("patch", {}))
                     elif cmd.get("op") == "speed":
                         engine.speed = float(cmd.get("value", 1.0))
+                    elif cmd.get("op") == "retina":
+                        # luminance per mapped photoreceptor, in uv-map order; [0,1]
+                        lum = np.asarray(cmd.get("lum", []), dtype=np.float32)
+                        if lum.shape == (len(G.retina),):
+                            with engine.lock:
+                                engine.stim.external_lum = np.clip(lum, 0, 1)
+                                engine.stim.state["visual"] = "external"
+                                engine._dirty = True
+                        continue
+                    elif cmd.get("op") == "readouts":
+                        await sock.send_str(json.dumps({"op": "readouts", "sim_ms": engine.sim_ms,
+                                                        "rates": engine.ro_rate.tolist(), "readouts": engine.readouts}))
+                        continue
                     elif cmd.get("op") == "pause":
                         engine.paused = bool(cmd.get("value"))
                     elif cmd.get("op") == "reset":

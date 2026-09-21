@@ -3,7 +3,8 @@
 A stimulus is a dict (JSON from the viewer):
   gain      : global multiplier (0..2)
   sugar     : bool                     LB3c at 30 mV
-  visual    : "off" | "flash" | "left" | "right" | "bar" | "grating"
+  visual    : "off" | "flash" | "left" | "right" | "bar" | "grating" | "loom" | "external"
+              ("external": luminance per mapped photoreceptor is pushed by a client, e.g. the body)
   lamina    : bool                     L1/L2/L3/L5 tonic 12 mV (auto-on with visual)
   orn       : {glomerulus: bool}       ORN_<glom> cells at 30 mV
   buttons   : {name: bool}             named cell sets from presets (FLYBOARD-style selectors)
@@ -94,6 +95,7 @@ class Stimulator:
         self.state = {"gain": 1.0, "sugar": False, "visual": "off", "lamina": False,
                       "orn": {}, "buttons": {}, "custom": []}
         self.retina_lum = np.zeros(len(G.retina), np.float32)
+        self.external_lum: np.ndarray | None = None   # set by the body process (visual="external")
 
     def set(self, patch: dict):
         for k, v in patch.items():
@@ -112,7 +114,12 @@ class Stimulator:
         if s.get("sugar"):
             d[G.sugar] = M.SUGAR_DRIVE
         vis = s.get("visual", "off")
-        if vis != "off":
+        if vis == "external" and self.external_lum is not None:
+            lum = self.external_lum
+            self.retina_lum = lum
+            d[G.retina] = 30.0 * lum / (0.02 + lum)
+            d[G.lamina] = M.LAMINA_TONIC
+        elif vis != "off":
             lum = luminance_pattern(G.uv, vis, t_s)
             self.retina_lum = lum
             d[G.retina] = 30.0 * lum / (0.02 + lum)
