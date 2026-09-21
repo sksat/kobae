@@ -109,7 +109,7 @@ function resize() {
 addEventListener("resize", () => { resize(); if (flight) flight.resize(); }); resize(); view("front");
 
 // ---------------------------------------------------------------- ws
-let simMs = 0, rt = 0, sps = 0, frames = 0, lastFpsT = performance.now();
+let simMs = 0, rt = 0, sps = 0, frames = 0, lastFpsT = performance.now(), lastAttrUp = 0;
 const scRate = new Float32Array(meta.superclasses.length);
 const roRate = new Float32Array(meta.readouts.length);
 let retinaLum = new Float32Array(meta.retina);
@@ -143,7 +143,7 @@ function connect() {
       const i = ids[k]; lastSpike[i] = simMs;
       const r = rasterSet.get(i); if (r !== undefined) raster.push(simMs, r);
     }
-    if (nIds) lastAttr.needsUpdate = true;
+    if (nIds && (mode !== "flight" || performance.now() - lastAttrUp > 100)) { lastAttr.needsUpdate = true; lastAttrUp = performance.now(); }
     sps = 0.8 * sps + 0.2 * (total / Math.max(frameSimS, 1e-6));
     while (raster.length > 60000) raster.splice(0, 2);
   };
@@ -290,7 +290,7 @@ function drawPath(canvas, m, W, H) {
   if (m.yaw !== undefined) { c.strokeStyle = "#ffe36b"; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 12 * Math.cos(m.yaw), y - 12 * Math.sin(m.yaw)); c.stroke(); }
   c.fillStyle = "#cfd6e2"; c.font = "10px ui-monospace"; c.fillText(`飛行経路 ${span.toFixed(0)} cm`, 6, H - 6);
 }
-let chaseUrl = null, eyesUrl = null;
+let chaseUrl = null, eyesUrl = null, lastEyes = 0;
 let flight = null;   // three.js flight view, created lazily on the first pose frame
 async function ensureFlight() {
   if (flight) return flight;
@@ -308,10 +308,15 @@ function onBodyBinary(buf, dv) {
     const ids = new Uint16Array(buf, 40, nb);
     const poses = new Float32Array(nb * 7);
     poses.set(new Float32Array(buf.slice(40 + nb * 2, 40 + nb * 2 + nb * 28)));
-    const eyes = new Blob([new Uint8Array(buf, 40 + nb * 2 + nb * 28, el)], { type: "image/jpeg" });
-    if (eyesUrl) URL.revokeObjectURL(eyesUrl); eyesUrl = URL.createObjectURL(eyes);
     ensureFlight().then(f => f.applyPoses(ids, poses));
-    onBody({ t, pos, yaw, cmd, eyesUrl });
+    // eyes: decode off the main thread (createImageBitmap) at most 10x per second, no object URLs
+    const now = performance.now();
+    if (now - lastEyes > 100) {
+      lastEyes = now;
+      const eyes = new Blob([new Uint8Array(buf, 40 + nb * 2 + nb * 28, el)], { type: "image/jpeg" });
+      createImageBitmap(eyes).then(bm => { for (const id of ["eyesbig", "bodyeyes"]) { const c = $("#" + id); if (c.width !== bm.width) { c.width = bm.width; c.height = bm.height; } c.getContext("2d").drawImage(bm, 0, 0); } bm.close(); });
+    }
+    onBody({ t, pos, yaw, cmd });
     return;
   }
   const jl = dv.getUint32(32, true), el = dv.getUint32(36, true);
@@ -325,7 +330,7 @@ function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
   if (!bodySeen) { bodySeen = true; setMode("flight"); }
   if (m.chaseUrl) { $("#bodycam").src = m.chaseUrl; }
-  if (m.eyesUrl) { $("#eyesbig").src = m.eyesUrl; $("#bodyeyes").src = m.eyesUrl; }
+  if (m.eyesUrl) { /* legacy KOBB path */ }
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
   drawPath($("#bodypath"), m, 360, 200); drawPath($("#minimap"), m, 220, 160);
   if (m.cmd) {

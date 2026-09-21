@@ -54,7 +54,7 @@
       <canvas id="fly"></canvas>
       <div id="flighthud"><span id="flightinfo"></span></div>
       <div id="flightviews" class="btns"><button data-fview="chase">追いかけ</button><button data-fview="top">上から</button><button data-fview="side">横から</button><button data-fview="wide">引き</button></div>
-      <img id="eyesbig" alt="eyes">
+      <canvas id="eyesbig" width="128" height="48"></canvas>
       <canvas id="minimap" width="220" height="160"></canvas>
     </div>
   </div>
@@ -78,7 +78,7 @@
     <section id="bodysec" hidden>
       <h3>体（flybody / MuJoCo）</h3><div class="dim">上: 追いかけカメラ。中: 左右の目（脳の網膜に入っている映像）。下: 上から見た飛行経路。</div>
       <img id="bodycam" alt="chase camera" style="width:100%;border-radius:4px;background:#000">
-      <img id="bodyeyes" alt="eyes" style="width:100%;border-radius:4px;background:#000;margin-top:4px">
+      <canvas id="bodyeyes" width="128" height="48" style="width:100%;border-radius:4px;background:#000;margin-top:4px"></canvas>
       <canvas id="bodypath" width="360" height="200"></canvas>
       <div class="dim" id="bodyinfo"></div>
     </section>

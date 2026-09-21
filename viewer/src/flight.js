@@ -23,7 +23,7 @@ export async function createFlightView(canvas) {
   scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x3a4a30, 0.9));
   const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
   sun.position.set(40, 25, 90); sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(512, 512);
   sun.shadow.camera.left = -30; sun.shadow.camera.right = 30; sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
   sun.shadow.camera.near = 1; sun.shadow.camera.far = 250;
   scene.add(sun); scene.add(sun.target);
