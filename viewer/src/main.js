@@ -260,6 +260,7 @@ const path = [];
 function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
   if (m.jpeg) $("#bodycam").src = "data:image/jpeg;base64," + m.jpeg;
+  if (m.eyes) $("#bodyeyes").src = "data:image/jpeg;base64," + m.eyes;
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
   const c = $("#bodypath").getContext("2d"); c.fillStyle = "#000"; c.fillRect(0, 0, 360, 200);
   if (path.length >= 4) {

@@ -222,7 +222,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                         continue
                     elif cmd.get("op") == "body":
                         # body process -> viewers: camera jpeg (base64) + pose; relayed as-is
-                        relay = json.dumps({"op": "body", "jpeg": cmd.get("jpeg"), "pos": cmd.get("pos"),
+                        relay = json.dumps({"op": "body", "jpeg": cmd.get("jpeg"), "eyes": cmd.get("eyes"), "pos": cmd.get("pos"),
                                             "yaw": cmd.get("yaw"), "cmd": cmd.get("cmd"), "t": cmd.get("t")})
                         for c in list(clients):
                             if c is not sock:

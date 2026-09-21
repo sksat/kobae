@@ -81,8 +81,10 @@ class Decoder:
         return speed, yaw
 
 
-async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool, mode: str = "bci"):
+async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool, mode: str = "bci",
+              camera: str = "walker/track2", video_fps: int = 30):
     body = FlightBody(policy, wpg)
+    frame_every = max(1, round(100 / video_fps))   # loop iterations (10 ms of body time) per video frame
     import aiohttp
     async with aiohttp.ClientSession() as s:
         meta = await (await s.get(brain.replace("ws://", "http://").replace("wss://", "https://").replace("/ws", "/api/meta"))).json()
@@ -110,13 +112,23 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
             speed, yaw = dec.command()
             body.command.speed, body.command.yaw = speed, yaw
             p, q = body.body_pose()
-            if int(round(sim_body * 100)) % 5 == 0:   # 20 Hz relay to the viewer
-                buf = io.BytesIO(); Image.fromarray(rgb).save(buf, format="JPEG", quality=70)
+            it = int(round(sim_body * 100))
+            if it % 5 == 0:   # 20 Hz relay to the viewer: chase camera + both eyes
+                chase = body.render(camera_id=camera, width=320, height=240)
+                eyes = np.concatenate([left, right], axis=1)
+                buf = io.BytesIO(); Image.fromarray(chase).save(buf, format="JPEG", quality=70)
+                ebuf = io.BytesIO(); Image.fromarray(eyes).save(ebuf, format="JPEG", quality=70)
                 await ws.send(json.dumps({"op": "body", "jpeg": base64.b64encode(buf.getvalue()).decode(),
+                                          "eyes": base64.b64encode(ebuf.getvalue()).decode(),
                                           "pos": [float(p[0]), float(p[1]), float(p[2])],
                                           "yaw": float(2 * np.arctan2(q[3], q[0])), "cmd": [speed, yaw], "t": sim_body}))
-            if video is not None and len(frames) < 3000:
-                frames.append(body.render(camera_id=1, width=320, height=240))
+            if video is not None and it % frame_every == 0 and len(frames) < 6000:
+                fr = body.render(camera_id=camera, width=640, height=480)
+                # picture-in-picture: the two eyes (what the brain sees) top-left
+                pip = np.concatenate([left, right], axis=1)
+                pip = np.asarray(Image.fromarray(pip).resize((256, 96)))
+                fr = fr.copy(); fr[8:104, 8:264] = pip
+                frames.append(fr)
             if verbose and int(sim_body * 100) % 50 == 0:
                 p, _ = body.body_pose()
                 print(f"body {sim_body:5.2f}s  pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f}  "
@@ -124,8 +136,8 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                       f"DNa02 L/R {dec.rate('DNa02','L'):.0f}/{dec.rate('DNa02','R'):.0f}  wall/body {(time.perf_counter()-t_start)/sim_body:.1f}x")
     if video and frames:
         import mediapy
-        mediapy.write_video(video, frames, fps=100)
-        print("wrote", video)
+        mediapy.write_video(video, frames, fps=video_fps)   # real-time playback
+        print("wrote", video, len(frames), "frames")
 
 
 def main():
@@ -137,8 +149,9 @@ def main():
     ap.add_argument("--video", default=None)
     ap.add_argument("-v", action="store_true")
     ap.add_argument("--mode", choices=["bci", "biological"], default="bci")
+    ap.add_argument("--camera", default="walker/track2", help="walker/track1|track2|track3|back|side|hero, top_camera")
     a = ap.parse_args()
-    asyncio.run(run(a.brain, a.policy, a.wpg, a.seconds, a.video, a.v, a.mode))
+    asyncio.run(run(a.brain, a.policy, a.wpg, a.seconds, a.video, a.v, a.mode, a.camera))
 
 
 if __name__ == "__main__":

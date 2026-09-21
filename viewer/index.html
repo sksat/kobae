@@ -63,8 +63,9 @@
       <canvas id="raster" width="360" height="160"></canvas>
     </section>
     <section id="bodysec" hidden>
-      <h3>体（flybody / MuJoCo）</h3><div class="dim">ハエの目のカメラ（脳の網膜に入っている映像）と、上から見た飛行経路。</div>
-      <img id="bodycam" alt="fly camera" style="width:100%;border-radius:4px;background:#000">
+      <h3>体（flybody / MuJoCo）</h3><div class="dim">上: 追いかけカメラ。中: 左右の目（脳の網膜に入っている映像）。下: 上から見た飛行経路。</div>
+      <img id="bodycam" alt="chase camera" style="width:100%;border-radius:4px;background:#000">
+      <img id="bodyeyes" alt="eyes" style="width:100%;border-radius:4px;background:#000;margin-top:4px">
       <canvas id="bodypath" width="360" height="200"></canvas>
       <div class="dim" id="bodyinfo"></div>
     </section>
