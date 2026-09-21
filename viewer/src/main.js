@@ -324,7 +324,6 @@ function tick(now) {
   renderer.render(scene, camera);
   if (mode !== "flight") labelRenderer.render(scene, camera);
   frames++;
-  const now = performance.now();
   if (now - lastFpsT > 500) {
     $("#fps").textContent = Math.round(frames * 1000 / (now - lastFpsT)); frames = 0; lastFpsT = now;
     $("#simt").textContent = (simMs / 1000).toFixed(2); $("#rt").textContent = rt.toFixed(3); $("#sps").textContent = Math.round(sps).toLocaleString();
