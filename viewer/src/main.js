@@ -262,12 +262,15 @@ canvas.addEventListener("pointerup", async (e) => {
 
 // body (flybody) relay
 const path = [];
-let mode = "brain", bodySeen = false;
+// the flight view (body + arena, brain as a side panel) is the default; the choice is remembered
+let mode = "flight", bodySeen = false;
 function setMode(m) {
   mode = m;
+  if (m === "flight") ensureFlight().then(f => f.resize());
   $("#flight").hidden = m !== "flight";
   $("#brainmini").hidden = m !== "flight";
   $("#bodysec").hidden = m === "flight" || !bodySeen;
+  $("#eyes").hidden = $("#minimap").hidden = !bodySeen;   // nothing to show in them until a body streams
   // in flight mode the 3D map moves into the right panel (same canvas, re-parented) and the
   // in-scene labels are hidden (they would float over the flight view)
   (m === "flight" ? $("#brainminibox") : $("#stage")).appendChild(canvas);
@@ -277,7 +280,7 @@ function setMode(m) {
   resize();
   if (flight) flight.resize();
 }
-document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { setMode(b.dataset.mode); try { localStorage.setItem("kobae.mode", b.dataset.mode); } catch {} });
 function drawPath(canvas, m, W, H) {
   const c = canvas.getContext("2d"); c.fillStyle = "rgba(0,0,0,0.6)"; c.clearRect(0, 0, W, H); c.fillRect(0, 0, W, H);
   if (path.length < 4) return;
@@ -293,14 +296,19 @@ function drawPath(canvas, m, W, H) {
   c.fillStyle = "#cfd6e2"; c.font = "10px ui-monospace"; c.fillText(`飛行経路 ${span.toFixed(0)} cm`, 6, H - 6);
 }
 let chaseUrl = null, eyesUrl = null, lastEyes = 0;
-let flight = null;   // three.js flight view, created lazily on the first pose frame
-async function ensureFlight() {
-  if (flight) return flight;
-  flight = await createFlightView($("#fly"));
-  document.querySelectorAll("[data-fview]").forEach(b => b.onclick = () => flight.views[b.dataset.fview]());
-  flight.resize();
-  return flight;
+let flight = null, flightLoading = null;   // three.js flight view, created on first use (12 MB rig)
+function ensureFlight() {
+  if (flightLoading) return flightLoading;
+  return flightLoading = (async () => {
+    flight = await createFlightView($("#fly"));
+    document.querySelectorAll("[data-fview]").forEach(b => b.onclick = () => flight.views[b.dataset.fview]());
+    if (!bodySeen) $("#flightinfo").textContent = "体は未接続 · 静止姿勢を表示中（body/ で kobae_body.loop を起動すると飛ぶ）";
+    flight.resize();
+    return flight;
+  })();
 }
+// initial view: the remembered choice, else flight
+setMode((() => { try { return localStorage.getItem("kobae.mode"); } catch { return null; } })() === "brain" ? "brain" : "flight");
 function onBodyBinary(buf, dv) {
   const magic = dv.getUint32(0, true);
   const t = dv.getFloat32(4, true), pos = [dv.getFloat32(8, true), dv.getFloat32(12, true), dv.getFloat32(16, true)];
@@ -330,7 +338,7 @@ function onBodyBinary(buf, dv) {
 }
 function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
-  if (!bodySeen) { bodySeen = true; setMode("flight"); }
+  if (!bodySeen) { bodySeen = true; if (mode === "flight") setMode("flight"); }   // re-layout only; never pull the user out of the brain view
   if (m.chaseUrl) { $("#bodycam").src = m.chaseUrl; }
   if (m.eyesUrl) { /* legacy KOBB path */ }
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }

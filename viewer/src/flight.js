@@ -88,6 +88,16 @@ export async function createFlightView(canvas) {
   camera.position.set(-1.1, -1.7, 0.9); controls.target.copy(target);
   const prevTarget = target.clone();
   let hasPose = false;
+  // before a body connects: the fly standing at the origin (rest pose exported with the rig)
+  if (rig.rest) {
+    for (let k = 0; k < rig.rest.ids.length; k++) {
+      const grp = bodyGroups.get(rig.rest.ids[k]); if (!grp) continue;
+      const o = k * 7, p = rig.rest.poses;
+      grp.position.set(p[o], p[o + 1], p[o + 2]); grp.quaternion.set(p[o + 4], p[o + 5], p[o + 6], p[o + 3]);
+    }
+    const th = bodyGroups.get(thoraxId);
+    if (th) { controls.target.copy(th.position); camera.position.set(th.position.x - 1.1, th.position.y - 1.7, th.position.z + 0.9); }
+  }
 
   function applyPoses(ids, poses) {
     for (let k = 0; k < ids.length; k++) {

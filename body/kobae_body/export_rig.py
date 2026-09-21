@@ -1,6 +1,7 @@
 """Export the flybody rig and the arena for the browser viewer.
 
-Output: rig.json  { bodies, geoms:[{body,mesh,color,pos,quat,type,size}], meshes:[{v0,nv,f0,nf}], walker_bodies }
+Output: rig.json  { bodies, geoms:[{body,mesh,color,pos,quat,type,size}], meshes:[{v0,nv,f0,nf}], walker_bodies,
+                    rest:{ids, poses} }   -- the fly standing on the floor at the origin (shown before a body connects)
         rig.bin   float32 vertices (all meshes concatenated) followed by uint32 face indices
 The compiled MuJoCo model holds only 272k triangles for the whole fly (the 154 MB of OBJ is text),
 so meshes are kept at full resolution unless they exceed ``max_tris``.
@@ -51,6 +52,19 @@ def main(out: str, max_tris: int = 40000):
             entry["mesh"] = mesh_index[mid]
         geoms.append(entry)
     walker_bodies = {b["id"] for b in bodies if b["name"].startswith("walker/")}
+    # rest pose: standing at the origin, wings folded, legs in stance; lowered so the lowest walker vertex touches the floor
+    body.place([0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 0.0], wings="folded", legs=body.leg_gait(0.0, 0.0))
+    d = body.physics.data.ptr
+    low = np.inf
+    for g in range(m.ngeom):
+        if int(m.geom_bodyid[g]) not in walker_bodies or int(m.geom_type[g]) != mujoco.mjtGeom.mjGEOM_MESH or m.geom_group[g] > 2:
+            continue
+        mid = int(m.geom_dataid[g]); v0, nv = int(m.mesh_vertadr[mid]), int(m.mesh_vertnum[mid])
+        world = m.mesh_vert[v0:v0 + nv] @ d.geom_xmat[g].reshape(3, 3).T + d.geom_xpos[g]
+        low = min(low, float(world[:, 2].min()))
+    body.place([0.0, 0.0, 1.0 - low], [1.0, 0.0, 0.0, 0.0], wings="folded", legs=body.leg_gait(0.0, 0.0))
+    ids = sorted(walker_bodies)
+    rest = {"ids": ids, "poses": [round(float(x), 5) for x in body.walker_poses(ids).ravel()]}
     out_p = Path(out); out_p.parent.mkdir(parents=True, exist_ok=True)
     verts = np.concatenate([v for v, _ in meshes]); faces = np.concatenate([f for _, f in meshes])
     index, v0, f0 = [], 0, 0
@@ -58,7 +72,7 @@ def main(out: str, max_tris: int = 40000):
         index.append({"v0": v0, "nv": len(v), "f0": f0, "nf": len(f)}); v0 += len(v); f0 += len(f)
     bin_p = out_p.with_suffix(".bin")
     bin_p.write_bytes(verts.astype(np.float32).tobytes() + faces.astype(np.uint32).tobytes())
-    out_p.write_text(json.dumps({"bodies": bodies, "geoms": geoms, "meshes": index, "walker_bodies": sorted(walker_bodies),
+    out_p.write_text(json.dumps({"bodies": bodies, "geoms": geoms, "meshes": index, "walker_bodies": sorted(walker_bodies), "rest": rest,
                                  "bin": bin_p.name, "n_vert": int(len(verts)), "n_face": int(len(faces))}))
     tris = int(len(faces))
     print(f"bodies {len(bodies)} geoms {len(geoms)} meshes {len(meshes)} tris {tris} -> {out_p} + {bin_p} ({bin_p.stat().st_size/1e6:.1f} MB)")
