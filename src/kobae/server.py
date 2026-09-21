@@ -11,7 +11,7 @@ Endpoints
 
 Frame (binary, little endian):
   u32 magic 0x4B4F4241 ('KOBA'), f32 sim_ms, f32 realtime_x, u32 total_spikes_in_frame,
-  u32 n_ids, u32 n_sc, u32 n_ro, u32 n_ret,
+  u32 n_ids, u32 n_sc, u32 n_ro, u32 n_ret, f32 frame_sim_s (simulated seconds covered by this frame),
   u32[n_ids] spiking neuron ids (unique within the frame),
   f32[n_sc]  per-superclass rate (Hz per cell), f32[n_ro] readout rates (Hz), f32[n_ret] retina luminance
 """
@@ -33,7 +33,8 @@ from .positions import compute_positions
 from .stimulus import BUTTONS, Stimulator, custom_indices
 
 MAGIC = 0x4B4F4241
-FRAME_STEPS = M.DELAY_STEPS * 2  # 3.6 ms of simulation per frame
+BATCH_MS = M.DELAY_STEPS * M.DT_MS  # 1.8 ms of simulation per GPU batch
+MAX_BATCHES_PER_FRAME = 400         # 720 ms of simulation per display frame at most
 
 
 class Engine(threading.Thread):
@@ -65,6 +66,7 @@ class Engine(threading.Thread):
         self.ro_rate = np.zeros(len(self.ro_idx), np.float32)
         self.cell_rate = np.zeros(G.n, np.float32)
         self.fps_cap = fps_cap
+        self.speed = 1.0      # target realtime factor; <= 0 means "as fast as possible"
         self._dirty = True
         self._last_stim_t = -1.0
 
@@ -75,11 +77,11 @@ class Engine(threading.Thread):
 
     def run(self):
         b = self.brain
-        dt_frame = FRAME_STEPS * M.DT_MS / 1000.0
-        t_wall_prev = time.perf_counter()
+        frame_wall = 1.0 / self.fps_cap
+        k = 1
         while True:
             if self.paused:
-                time.sleep(0.05); t_wall_prev = time.perf_counter(); continue
+                time.sleep(0.05); continue
             t0 = time.perf_counter()
             with self.lock:
                 vis_dyn = self.stim.state.get("visual") in ("flash", "bar", "grating", "loom")
@@ -87,14 +89,23 @@ class Engine(threading.Thread):
                     b.set_drive(self.stim.drive(self.sim_ms / 1000.0))
                     self._dirty = False; self._last_stim_t = self.sim_ms
                 lum = self.stim.retina_lum.copy()
+                speed = self.speed
+            # batches this frame: enough to advance `speed` x realtime during one display frame
+            if speed > 0:
+                k = int(np.clip(round(speed * frame_wall * 1000 / BATCH_MS), 1, MAX_BATCHES_PER_FRAME))
             if self.backend == "gpu":
-                b.run_steps(FRAME_STEPS, sync=True)
+                b.run(k, sync=True)
                 counts = b.read_counts(clear=True)
             else:
-                counts, _, _ = b.run(FRAME_STEPS)
-            self.sim_ms += FRAME_STEPS * M.DT_MS
+                k = 1 if speed <= 0 else k
+                counts, _, _ = b.run(k * M.DELAY_STEPS)
+            dt_frame = k * BATCH_MS / 1000.0
+            self.sim_ms += k * BATCH_MS
             el = time.perf_counter() - t0
-            self.rt = 0.9 * self.rt + 0.1 * (dt_frame / max(el, 1e-6)) if self.rt else dt_frame / max(el, 1e-6)
+            inst = dt_frame / max(el, 1e-6)
+            self.rt = 0.9 * self.rt + 0.1 * inst if self.rt else inst
+            if speed <= 0:  # free-running: grow/shrink k to keep ~frame_wall per iteration
+                k = int(np.clip(round(k * frame_wall / max(el, 1e-6)), 1, MAX_BATCHES_PER_FRAME))
             # rates: exponential moving average of spikes/s per cell
             a = dt_frame / self.rate_tau
             self.cell_rate *= (1 - a)
@@ -103,15 +114,14 @@ class Engine(threading.Thread):
             self.sc_rate = np.bincount(self.sc_index, weights=self.cell_rate, minlength=len(self.sc_names)).astype(np.float32) / self.sc_count
             self.ro_rate = self.cell_rate[self.ro_idx].astype(np.float32)
             ids = np.flatnonzero(counts).astype(np.uint32)
-            frame = struct.pack("<IffIIIII", MAGIC, self.sim_ms, self.rt, int(counts.sum()),
-                                len(ids), len(self.sc_rate), len(self.ro_rate), len(lum)) \
+            frame = struct.pack("<IffIIIIIf", MAGIC, self.sim_ms, self.rt, int(counts.sum()),
+                                len(ids), len(self.sc_rate), len(self.ro_rate), len(lum), dt_frame) \
                 + ids.tobytes() + self.sc_rate.tobytes() + self.ro_rate.tobytes() + lum.astype(np.float32).tobytes()
             if self.loop is not None and self.frames is not None:
                 self.loop.call_soon_threadsafe(self._offer, frame)
             # do not out-run the display; cap frames/s
-            budget = 1.0 / self.fps_cap
-            if el < budget:
-                time.sleep(budget - el)
+            if el < frame_wall:
+                time.sleep(frame_wall - el)
 
     def _offer(self, frame):
         q = self.frames
@@ -150,7 +160,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
             "orn": {k: int(len(v)) for k, v in engine.stim.orn.items()},
             "measured_positions": int(measured.sum()), "backend": engine.backend,
             "retina": int(len(G.retina)), "uv": G.uv.astype(np.float32).ravel().tolist(),
-            "state": engine.stim.state, "dt_ms": M.DT_MS, "frame_ms": FRAME_STEPS * M.DT_MS,
+            "state": engine.stim.state, "dt_ms": M.DT_MS, "batch_ms": BATCH_MS, "speed": engine.speed,
             "landmarks": landmarks,
         })
 
@@ -183,13 +193,15 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
         sock = web.WebSocketResponse(max_msg_size=64 << 20)
         await sock.prepare(request)
         clients.add(sock)
-        await sock.send_str(json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused}))
+        await sock.send_str(json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused, "speed": engine.speed}))
         try:
             async for msg in sock:
                 if msg.type == web.WSMsgType.TEXT:
                     cmd = json.loads(msg.data)
                     if cmd.get("op") == "stim":
                         engine.apply(cmd.get("patch", {}))
+                    elif cmd.get("op") == "speed":
+                        engine.speed = float(cmd.get("value", 1.0))
                     elif cmd.get("op") == "pause":
                         engine.paused = bool(cmd.get("value"))
                     elif cmd.get("op") == "reset":
@@ -201,7 +213,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                             engine.brain = CpuBrain(G)
                         engine.cell_rate[:] = 0; engine.sim_ms = 0.0; engine._dirty = True
                         engine.paused = False
-                    msg_state = json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused})
+                    msg_state = json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused, "speed": engine.speed})
                     for c in list(clients):
                         try: await c.send_str(msg_state)
                         except Exception: pass

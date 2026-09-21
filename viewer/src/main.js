@@ -119,12 +119,13 @@ let ws;
 function connect() {
   ws = new WebSocket(wsUrl); ws.binaryType = "arraybuffer";
   ws.onmessage = (ev) => {
-    if (typeof ev.data === "string") { const m = JSON.parse(ev.data); if (m.op === "state") syncUI(m.state, m.paused); return; }
+    if (typeof ev.data === "string") { const m = JSON.parse(ev.data); if (m.op === "state") { syncUI(m.state, m.paused); if (m.speed !== undefined) setSpeedUI(m.speed); } return; }
     const dv = new DataView(ev.data);
     if (dv.getUint32(0, true) !== MAGIC) return;
     simMs = dv.getFloat32(4, true); rt = dv.getFloat32(8, true);
     const total = dv.getUint32(12, true), nIds = dv.getUint32(16, true), nSc = dv.getUint32(20, true), nRo = dv.getUint32(24, true), nRet = dv.getUint32(28, true);
-    let o = 32;
+    const frameSimS = dv.getFloat32(32, true);
+    let o = 36;
     const ids = new Uint32Array(ev.data, o, nIds); o += nIds * 4;
     scRate.set(new Float32Array(ev.data, o, nSc)); o += nSc * 4;
     roRate.set(new Float32Array(ev.data, o, nRo)); o += nRo * 4;
@@ -134,7 +135,7 @@ function connect() {
       const r = rasterSet.get(i); if (r !== undefined) raster.push(simMs, r);
     }
     if (nIds) lastAttr.needsUpdate = true;
-    sps = 0.8 * sps + 0.2 * (total / (meta.frame_ms / 1000));
+    sps = 0.8 * sps + 0.2 * (total / Math.max(frameSimS, 1e-6));
     while (raster.length > 60000) raster.splice(0, 2);
   };
   ws.onopen = () => { while (pending.length) ws.send(JSON.stringify(pending.shift())); };
@@ -157,6 +158,10 @@ function syncUI(s, paused) {
   if (paused !== undefined) $("#pause").classList.toggle("on", paused);
 }
 $("#gain").oninput = (e) => stim({ gain: +e.target.value });
+const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 0];
+function setSpeedUI(v) { $("#speed").value = SPEEDS.indexOf(v) >= 0 ? SPEEDS.indexOf(v) : 3; $("#speedv").textContent = v > 0 ? `${v}× 実時間` : "最速"; }
+$("#speed").oninput = (e) => { const v = SPEEDS[+e.target.value]; setSpeedUI(v); send({ op: "speed", value: v }); };
+setSpeedUI(meta.speed ?? 1);
 document.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => stim({ [b.dataset.toggle]: !state[b.dataset.toggle] }));
 document.querySelectorAll("[data-visual]").forEach(b => b.onclick = () => stim({ visual: b.dataset.visual }));
 let paused = false;
