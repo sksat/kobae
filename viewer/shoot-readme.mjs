@@ -1,6 +1,6 @@
 // README screenshots against a running kobae server (default: BC-250).
 //   node shoot-readme.mjs [brain|flight] [base-url]
-// "brain": sugar on -> brain view lit, then the bar stimulus; leaves the sim as found (sugar off, reset).
+// "brain": sugar on -> brain view lit; leaves the sim as found (sugar off, reset).
 // "flight": expects the body loop to be running; captures the flight view from the chase camera.
 // Rendering is software GL (swiftshader) on purpose: the workstation GPU stays out of it.
 import { chromium } from "playwright";
@@ -25,13 +25,7 @@ if (what === "brain") {
   console.log("sugar", await state());
   await page.screenshot({ path: `${out}viewer-brain-sugar.png` });
   await page.click("[data-toggle=sugar]");
-  await page.click("#reset"); await page.waitForTimeout(1500);   // leave the sugar attractor
-  await page.click("[data-visual=bar]");                  // a bar sweeping across both eyes: optic lobes light up
-  await page.waitForTimeout(4000);
-  console.log("bar", await state());
-  await page.screenshot({ path: `${out}viewer-brain-bar.png` });
-  await page.click("[data-visual=off]");
-  await page.click("#reset"); await page.waitForTimeout(500);
+  await page.click("#reset"); await page.waitForTimeout(500);   // leave the sugar attractor
 } else {
   await page.click("[data-mode=flight]"); await page.waitForTimeout(6000);
   console.log("flight", await state());
