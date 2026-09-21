@@ -154,6 +154,8 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
             speed, yaw = dec.command()
             p, q = body.body_pose()
             if flying:
+                if behaviour and behaviour.homing > 0:   # arena boundary assist (engineering, see behavior.py)
+                    yaw = (1 - behaviour.homing) * yaw + behaviour.homing * behaviour.home_yaw
                 body.command.speed, body.command.yaw = speed, yaw
                 # hold a cruising height (the perches walk up the pillars): gentle descent/climb toward 1.5 cm
                 body.command.climb = float(np.clip(0.4 * (1.5 - p[2]), -3.0, 3.0))

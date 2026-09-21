@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import numpy as np
 
-from .flight import CONTROL_DT, FlightBody
+from .flight import ARENA_RADIUS, CONTROL_DT, FlightBody
 
 
 def quat_from_axes(x, z):
@@ -65,6 +65,8 @@ class Behaviour:
         self._p0 = self._q0 = self._p1 = self._q1 = None
         self._normal = None
         self._gait_phase = 0.0
+        self.homing = 0.0
+        self.home_yaw = 0.0
 
     # ---- helpers
     def _pose(self):
@@ -91,6 +93,14 @@ class Behaviour:
         p, q = self._pose()
         yaw = 2 * math.atan2(q[3], q[0])
         if self.state == "FLY":
+            # stay inside the arena: beyond 80 % of the radius, blend the brain's turn command toward the centre
+            r = math.hypot(p[0], p[1])
+            self.homing = 0.0
+            if r > 0.8 * ARENA_RADIUS:
+                to_centre = math.atan2(-p[1], -p[0])
+                err = (to_centre - yaw + math.pi) % (2 * math.pi) - math.pi
+                self.homing = min(1.0, (r - 0.8 * ARENA_RADIUS) / (0.2 * ARENA_RADIUS))
+                self.home_yaw = float(np.clip(2.0 * err, -2.5, 2.5))
             if self.t_state > self.min_fly_s:
                 hit = self._pillar_ahead(p, yaw)
                 if hit is not None:

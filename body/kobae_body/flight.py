@@ -31,7 +31,10 @@ CONTROL_DT = 2e-4  # flybody flight control timestep, s (matches _FLY_CONTROL_TI
 EYE_CAMERAS = ("walker/eye_left", "walker/eye_right")
 
 
-def add_scenery(arena_mjcf, seed: int = 0, n_pillars: int = 60, radius: float = 120.0, floor: float = 400.0):
+ARENA_RADIUS = 150.0   # cm; a wall ring keeps the world finite and the fly's eyes always see something
+
+
+def add_scenery(arena_mjcf, seed: int = 0, n_pillars: int = 60, radius: float = 120.0, floor: float = 3000.0):
     """Make the world worth looking at: a large lit floor (flybody's arena floor is 8x8 cm, the fly
     leaves it in half a second), a sky, coloured pillars and a few big landmarks."""
     rng = np.random.default_rng(seed)
@@ -61,11 +64,19 @@ def add_scenery(arena_mjcf, seed: int = 0, n_pillars: int = 60, radius: float = 
         h = rng.uniform(3, 12); c = palette[k % len(palette)]
         wb.add("geom", name=f"pillar{k}", type="cylinder", size=[rng.uniform(0.4, 1.2), h],
                pos=[r * np.cos(a), r * np.sin(a), h], rgba=c + [1], contype=0, conaffinity=0)
-    # a few big landmarks on the horizon
+    # a few big landmarks inside the ring
     for k, c in enumerate(palette):
         a = 2 * np.pi * k / len(palette)
         wb.add("geom", name=f"landmark{k}", type="box", size=[6, 6, 25],
-               pos=[radius * 1.6 * np.cos(a), radius * 1.6 * np.sin(a), 25], rgba=c + [1], contype=0, conaffinity=0)
+               pos=[radius * 1.15 * np.cos(a), radius * 1.15 * np.sin(a), 25], rgba=c + [1], contype=0, conaffinity=0)
+    # the arena wall: a ring of tall panels in alternating tones (a horizon the eyes can see from anywhere)
+    n_wall = 48
+    for k in range(n_wall):
+        a = 2 * np.pi * (k + 0.5) / n_wall
+        tone = [0.82, 0.8, 0.74] if k % 2 == 0 else [0.36, 0.34, 0.3]
+        wb.add("geom", name=f"wall{k}", type="box", size=[ARENA_RADIUS * np.pi / n_wall, 1.0, 40],
+               pos=[ARENA_RADIUS * np.cos(a), ARENA_RADIUS * np.sin(a), 40], euler=[0, 0, np.degrees(a) + 90],
+               rgba=tone + [1], contype=0, conaffinity=0)
 
 
 class NumpyPolicy:
