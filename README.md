@@ -7,9 +7,9 @@
 - 対象 GPU は AMD（RX 580 / BC-250 gfx1013）。CUDA は使わない。GPU 側の計算は整数固定小数点で**同じ GPU なら実行ごとにビット単位で再現**する
 - 「コバエ」は俗称で、厳密にはショウジョウバエ (*Drosophila melanogaster*) は「コバエ」と呼ばれる小型のハエの一種
 
-<img src="docs/viewer-flight.png" width="800">
+<img src="docs/viewer-flight.gif" width="800">
 
-（飛行ビュー。脳の出力で操舵される体が主役で、左下が両目に映る映像と状態、右下が飛行経路。脳の点群と行動の出力・発火の時系列は右パネル）
+（飛行ビュー、約 2 倍速。柱から離陸して降下・旋回しながら飛ぶ 20 秒。脳の出力で操舵される体が主役で、左下が両目に映る映像と状態、右下が飛行経路。脳の点群と行動の出力・発火の時系列は右パネル）
 
 設計の経緯と決定は [DESIGN.md](DESIGN.md)、既存実装の評価は [docs/existing-implementations.md](docs/existing-implementations.md)。
 
