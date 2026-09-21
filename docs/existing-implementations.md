@@ -47,3 +47,14 @@
 
 - 糖刺激の方が視覚より重いのは、たった 23 細胞から 33k 細胞が持続発火する（1 細胞あたり 33 Hz）ため。Shiu 型 + 全結合 + 曖昧符号 +1 でどれだけ活動が広がるかの基準値として重要（Eon の FlyWire 版は活動細胞 ~450 だった）
 - これが kobae GPU 版の**検算相手**であり、**CPU の基準値**（Codex 指摘の通り、GPU 側の勝ち筋は scatter の帯域）
+
+### Fly.exe の体（開発機、flygym 2.1.0 + MuJoCo 3.9.0、神経なし）
+- `eval/Fly.exe`。uv 3.13 環境（`flygym==2.1.0 mujoco>=3.9,<3.10`、`flygym_demo` は flygym の wheel に同梱）
+- `scripts/body_controller_preview.py --headless`（EGL）: NeuroMechFly（メスの体を population prior として使用と明記）を flygym_demo の HybridTurningController（CPG + 脚接地の反射）で歩かせる。2 s / dt 0.5 ms = 4,000 step + 60 fps 相当の描画で **8.7 s**、前進 26 mm。動画 `eval/out/flygym-walk.mp4`
+- Fly.exe の web preview モードは MuJoCo ではなく 2D の「運動学 + 衝突円盤」プロキシなので、体を見るならこのスクリプト
+- **飛行はない**（README: "wing command in a body with no air"、揚力ゼロ）。NeuroMechFly / flygym は歩行・身繕い用の体
+- 流用できるもの: flygym の Simulation / renderer / 追尾カメラの使い方（CPU で十分速い）、Fly.exe の `engines/flygym.py`（下行ニューロンの発火レート → 歩行コントローラの前進・旋回指令、GPL-2.0 なので写経ではなく参考）
+
+### flybody（Google DeepMind / Janelia、Apache-2.0）— 飛行の唯一の既存資産
+- figshare 25309105: `trained-fly-policies.zip` 6.5 MB（歩行 + 飛行 + 視覚誘導飛行の学習済みポリシー、TF SavedModel）、`flight-controller-reuse-checkpoints.zip` 32 MB、`datasets_flight-imitation.zip` 13 MB。`data/flybody/` に取得中（figshare は 202 を返してから配信開始するので遅い）
+- webgpu-fly が歩行ポリシーで実証した手順（SavedModel → 重みを抽出 → 自前の MLP forward pass、`tools/extract_walking_policy.py`）を飛行ポリシーで繰り返せば、TensorFlow 無しで飛行制御が動く。ポリシーは obs[741] → 512×4 (LayerNorm+tanh) → 59 actions の小さな MLP
