@@ -32,12 +32,13 @@ $("#legend").innerHTML = "<b>点の色 = 細胞のクラス</b><br>" + meta.supe
 // ---------------------------------------------------------------- scene
 const canvas = $("#gl");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(1);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x07090d);
 const camera = new THREE.PerspectiveCamera(45, 1, 1, 20000);
 
 const controls = new OrbitControls(camera, canvas);
+window.__cam = () => camera.position.toArray().map(v => Math.round(v));
 controls.enableDamping = true; controls.dampingFactor = 0.08;
 
 const geom = new THREE.BufferGeometry();
@@ -101,7 +102,7 @@ function resize() {
   const w = Math.max(1, Math.round(box.width)), h = Math.max(1, Math.round(box.height));
   renderer.setSize(w, h, false);
   labelRenderer.setSize(w, h);
-  Object.assign(labelRenderer.domElement.style, { position: "absolute", left: box.left + "px", top: box.top + "px", pointerEvents: "none" });
+  Object.assign(labelRenderer.domElement.style, { position: "absolute", left: "0px", top: "0px", pointerEvents: "none" });
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 addEventListener("resize", resize); resize(); view("front");
@@ -312,8 +313,12 @@ function onBody(m) {
 }
 
 // ---------------------------------------------------------------- loop
-function tick() {
+let lastRender = 0;
+function tick(now) {
   requestAnimationFrame(tick);
+  if (document.hidden) return;
+  if (now - lastRender < 33) return;        // 30 fps is plenty for a point cloud; halves GPU/compositor work
+  lastRender = now;
   controls.update();
   mat.uniforms.uNow.value = simMs;
   renderer.render(scene, camera);
@@ -330,4 +335,4 @@ function tick() {
     drawRetina(); drawRaster();
   }
 }
-tick();
+requestAnimationFrame(tick);

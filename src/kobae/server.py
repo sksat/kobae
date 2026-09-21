@@ -39,6 +39,7 @@ from .stimulus import BUTTONS, Stimulator, custom_indices
 
 MAGIC = 0x4B4F4241
 BATCH_MS = M.DELAY_STEPS * M.DT_MS  # 1.8 ms of simulation per GPU batch
+VIEW_HZ = 20.0                      # frames sent to viewers per wall second (engine iterations are merged)
 MAX_BATCHES_PER_FRAME = 400         # 720 ms of simulation per display frame at most
 
 
@@ -79,6 +80,11 @@ class Engine(threading.Thread):
         self._req_done = threading.Event()
         self._dirty = True
         self._last_stim_t = -1.0
+        self._acc_ids: set[int] | None = None
+        self._acc_counts = np.zeros(G.n, np.float64)
+        self._acc_sim = 0.0
+        self._acc_total = 0
+        self._last_emit = 0.0
 
     def apply(self, patch: dict):
         with self.lock:
@@ -133,12 +139,19 @@ class Engine(threading.Thread):
             np.add.at(self.sc_rate, np.arange(len(self.sc_names)), 0)  # keep dtype
             self.sc_rate = np.bincount(self.sc_index, weights=self.cell_rate, minlength=len(self.sc_names)).astype(np.float32) / self.sc_count
             self.ro_rate = self.cell_rate[self.ro_idx].astype(np.float32)
-            ids = np.flatnonzero(counts >= (0.5 if self.graded_mask is None else 0.5)).astype(np.uint32)
-            frame = struct.pack("<IffIIIIIf", MAGIC, self.sim_ms, self.rt, int(counts.sum()),
-                                len(ids), len(self.sc_rate), len(self.ro_rate), len(lum), dt_frame) \
-                + ids.tobytes() + self.sc_rate.tobytes() + self.ro_rate.tobytes() + lum.astype(np.float32).tobytes()
-            if self.loop is not None and self.frames is not None:
-                self.loop.call_soon_threadsafe(self._offer, frame)
+            # merge engine iterations into viewer frames at VIEW_HZ (a viewer cannot use 60 x 30k ids/s)
+            self._acc_counts += counts
+            self._acc_sim += dt_frame
+            self._acc_total += int(counts.sum())
+            now = time.perf_counter()
+            if now - self._last_emit >= 1.0 / VIEW_HZ:
+                ids = np.flatnonzero(self._acc_counts >= 0.5).astype(np.uint32)
+                frame = struct.pack("<IffIIIIIf", MAGIC, self.sim_ms, self.rt, self._acc_total,
+                                    len(ids), len(self.sc_rate), len(self.ro_rate), len(lum), self._acc_sim) \
+                    + ids.tobytes() + self.sc_rate.tobytes() + self.ro_rate.tobytes() + lum.astype(np.float32).tobytes()
+                if self.loop is not None and self.frames is not None:
+                    self.loop.call_soon_threadsafe(self._offer, frame)
+                self._acc_counts[:] = 0; self._acc_sim = 0.0; self._acc_total = 0; self._last_emit = now
             if self.lockstep:
                 self._req_batches -= k
                 if self._req_batches <= 0:

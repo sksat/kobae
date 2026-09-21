@@ -1,4 +1,4 @@
-:root { color-scheme: dark; --bg:#07090d; --panel:rgba(14,18,26,.86); --fg:#d9dee7; --dim:#8a93a3; --acc:#7cc7ff; }
+:root { color-scheme: dark; --bg:#07090d; --panel:#0e121a; --fg:#d9dee7; --dim:#8a93a3; --acc:#7cc7ff; }
 html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px/1.4 ui-monospace, "JetBrains Mono", "BIZ UDGothic", monospace; }
 #app { position:relative; width:100vw; height:100vh; overflow:hidden; display:grid; grid-template-columns: 300px 1fr 380px; gap:8px; padding:8px; box-sizing:border-box; }
 #stage { position:relative; min-width:0; height:100%; }
@@ -9,12 +9,12 @@ html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:
 #minimap { position:absolute; right:12px; bottom:12px; background:rgba(0,0,0,.6); border:1px solid #2b3648; border-radius:4px; }
 #flighthud { position:absolute; left:12px; bottom:12px; background:rgba(7,9,13,.6); padding:4px 8px; border-radius:4px; font-size:12px; }
 #modes { margin-left:14px; } #modes button { padding:2px 9px; font-size:11px; }
-#hud { position:absolute; left:50%; top:16px; transform:translateX(-50%); display:flex; gap:18px; align-items:baseline; background:var(--panel); padding:6px 14px; border-radius:8px; }
+#hud { position:absolute; z-index:10; background:#0e121a; left:50%; top:16px; transform:translateX(-50%); display:flex; gap:18px; align-items:baseline; background:var(--panel); padding:6px 14px; border-radius:8px; }
 #title { font-weight:700; letter-spacing:.06em; }
 #title span { color:var(--dim); font-weight:400; font-size:11px; }
 #meters span { margin-right:14px; color:var(--dim); }
 #meters b { color:var(--fg); font-weight:600; }
-#left, #right { position:static; height:100%; overflow-y:auto; background:var(--panel); border-radius:8px; padding:10px 12px; box-sizing:border-box; backdrop-filter: blur(4px); }
+#left, #right { position:static; height:100%; overflow-y:auto; background:var(--panel); border-radius:8px; padding:10px 12px; box-sizing:border-box; }
 @media (max-width:1400px){ #app{grid-template-columns: 250px 1fr 320px} }
 h3 { margin:6px 0 8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--acc); }
 h4 { margin:12px 0 4px; font-size:11px; color:var(--dim); }
