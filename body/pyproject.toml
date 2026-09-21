@@ -12,4 +12,5 @@ dependencies = [
   "websockets",
   "pillow",
   "mediapy",
+  "aiohttp",
 ]
