@@ -56,7 +56,12 @@ def luminance_from_eyes(left: np.ndarray, right: np.ndarray, uv: np.ndarray) -> 
 class Decoder:
     """Two read-out modes, both engineered mappings (DoomFly's decoders):
     biological: DNa02 R-L -> turn, DNp09 -> forward, MDN -> backward (silent under pure visual input)
-    bci       : DNp20 R-L -> turn, DNpe017 -> forward (visual descending neurons; the default here)"""
+    bci       : DNp20 R-L -> turn, DNpe017 -> forward (visual descending neurons; the default here)
+
+    Calibration: the connectome is not mirror-symmetric. Under uniform illumination the right DNp20
+    fires ~11 Hz more than the left (44 vs 33 Hz; 21 vs 10 Hz in the dark), which as a raw command
+    is a permanent right turn. ``calibrate`` records per-readout baselines under uniform light and
+    the decoder uses rate - baseline (DoomFly calibrated its BCI read-outs the same way)."""
 
     def __init__(self, readouts: list[dict], mode="bci", k_turn=0.12, k_fwd=0.4, k_back=0.3, base_speed=12.0, tau=0.1):
         self.readouts = readouts
@@ -64,12 +69,17 @@ class Decoder:
         self.k_turn, self.k_fwd, self.k_back, self.base = k_turn, k_fwd, k_back, base_speed
         self.tau = tau
         self.rates = np.zeros(len(readouts))
+        self.baseline = np.zeros(len(readouts))
 
     def update(self, rates, dt):
         a = 1 - np.exp(-dt / self.tau)
         self.rates += a * (np.asarray(rates) - self.rates)
 
     def rate(self, typ, side=None):
+        return sum(r - b for r, b, ro in zip(self.rates, self.baseline, self.readouts)
+                   if ro["type"] == typ and (side is None or ro["side"] == side))
+
+    def raw(self, typ, side=None):
         return sum(r for r, ro in zip(self.rates, self.readouts) if ro["type"] == typ and (side is None or ro["side"] == side))
 
     def command(self):
@@ -100,6 +110,20 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
     frames = []
     async with websockets.connect(brain, max_size=1 << 26) as ws:
         await ws.send(json.dumps({"op": "stim", "patch": {"visual": "external"}}))
+        # calibration: 3 s of uniform illumination, record baselines
+        await ws.send(json.dumps({"op": "retina", "lum": [0.5] * len(uv)}))
+        acc = []
+        for _ in range(33):
+            await ws.send(json.dumps({"op": "step", "ms": 90}))
+            while True:
+                msg = await ws.recv()
+                if isinstance(msg, str):
+                    m = json.loads(msg)
+                    if m.get("op") == "readouts":
+                        acc.append(m["rates"]); break
+        dec.baseline = np.mean(acc[-11:], axis=0)
+        if verbose:
+            print("calibrated baselines (Hz):", {ro["type"] + ro["side"]: round(b, 1) for ro, b in zip(dec.readouts, dec.baseline)})
         t_start = time.perf_counter(); last_relay = 0.0; sim_body = 0.0
         # one loop iteration = 9 ms of body time (45 control steps) = 5 brain batches, in LOCKSTEP:
         # the brain advances exactly the body's elapsed time, so brain time == body time

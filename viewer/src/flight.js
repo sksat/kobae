@@ -5,6 +5,9 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export async function createFlightView(canvas) {
   const rig = await (await fetch("/rig/rig.json")).json();
+  const bin = await (await fetch("/rig/" + rig.bin)).arrayBuffer();
+  const allV = new Float32Array(bin, 0, rig.n_vert * 3);
+  const allF = new Uint32Array(bin, rig.n_vert * 12, rig.n_face * 3);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;
@@ -35,8 +38,8 @@ export async function createFlightView(canvas) {
   };
   const geoms = rig.meshes.map((m) => {
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(m.v, 3));
-    g.setIndex(m.f);
+    g.setAttribute("position", new THREE.BufferAttribute(allV.subarray(m.v0 * 3, (m.v0 + m.nv) * 3), 3));
+    g.setIndex(new THREE.BufferAttribute(allF.subarray(m.f0 * 3, (m.f0 + m.nf) * 3), 1));
     g.computeVertexNormals();
     return g;
   });
@@ -115,5 +118,5 @@ export async function createFlightView(canvas) {
     side: () => { const t = controls.target; camera.position.set(t.x + 2.5, t.y, t.z + 0.4); },
     wide: () => { const t = controls.target; camera.position.set(t.x - 15, t.y - 25, t.z + 15); },
   };
-  return { applyPoses, resize, render, views, get hasPose() { return hasPose; }, tris: rig.meshes.reduce((a, m) => a + m.f.length / 3, 0) };
+  return { applyPoses, resize, render, views, get hasPose() { return hasPose; }, tris: rig.n_face };
 }
