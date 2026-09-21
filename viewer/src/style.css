@@ -33,3 +33,6 @@ input[type=text], input:not([type]), input[type=number] { background:#0e131b; co
 #views { margin-left:14px; }
 #views button { padding:2px 7px; font-size:11px; }
 #hud { flex-wrap:wrap; }
+
+.landmark { color:#cfd6e2; font-size:12px; background:rgba(7,9,13,.55); padding:1px 6px; border-radius:4px; border:1px solid #2b3648; white-space:nowrap; }
+#labels { position:absolute; top:0; left:0; pointer-events:none; }

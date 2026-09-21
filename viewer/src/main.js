@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
 const $ = (s) => document.querySelector(s);
 const MAGIC = 0x4b4f4241;
@@ -85,10 +86,22 @@ const mat = new THREE.ShaderMaterial({
 });
 const points = new THREE.Points(geom, mat);
 scene.add(points);
+// landmark labels that follow the cloud when it is rotated
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.id = "labels";
+canvas.parentElement.appendChild(labelRenderer.domElement);
+for (const [name, p] of Object.entries(meta.landmarks || {})) {
+  if (!p) continue;
+  const el = document.createElement("div"); el.className = "landmark"; el.textContent = name;
+  const o = new CSS2DObject(el); o.position.set(p[0], p[1], p[2]); scene.add(o);
+}
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   renderer.setSize(w, h, false);
+  labelRenderer.setSize(w, h);
+  const r = canvas.getBoundingClientRect();
+  Object.assign(labelRenderer.domElement.style, { position: "absolute", left: r.left + "px", top: r.top + "px", pointerEvents: "none" });
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 addEventListener("resize", resize); resize(); view("front");
@@ -196,6 +209,8 @@ function drawRetina() {
     rc.fillRect(uv[2*i] * 238, uv[2*i+1] * 118, 2, 2);
   }
   rc.strokeStyle = "#2b3648"; rc.beginPath(); rc.moveTo(120, 0); rc.lineTo(120, 120); rc.stroke();
+  rc.fillStyle = "#8a93a3"; rc.font = "11px ui-monospace, monospace";
+  rc.fillText("左目", 4, 12); rc.fillText("右目", 124, 12);
 }
 // raster
 const rr = $("#raster").getContext("2d");
@@ -236,6 +251,7 @@ function tick() {
   controls.update();
   mat.uniforms.uNow.value = simMs;
   renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
   frames++;
   const now = performance.now();
   if (now - lastFpsT > 500) {

@@ -124,6 +124,16 @@ class Engine(threading.Thread):
 def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
     pos, measured = compute_positions(G)
     sc_u8 = engine.sc_index
+    def centroid(mask):
+        m = mask & measured
+        return pos[m].mean(axis=0).tolist() if m.any() else None
+    sc = G.superclass
+    landmarks = {
+        "脳": centroid(np.isin(sc, ["cb_intrinsic"])),
+        "腹髄": centroid(np.isin(sc, ["vnc_intrinsic", "vnc_motor"])),
+        "左目": centroid((sc == "ol_intrinsic") & (G.soma_side == "L")),
+        "右目": centroid((sc == "ol_intrinsic") & (G.soma_side == "R")),
+    }
     clients: set[web.WebSocketResponse] = set()
 
     async def index(request):
@@ -141,6 +151,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
             "measured_positions": int(measured.sum()), "backend": engine.backend,
             "retina": int(len(G.retina)), "uv": G.uv.astype(np.float32).ravel().tolist(),
             "state": engine.stim.state, "dt_ms": M.DT_MS, "frame_ms": FRAME_STEPS * M.DT_MS,
+            "landmarks": landmarks,
         })
 
     async def positions(request):
