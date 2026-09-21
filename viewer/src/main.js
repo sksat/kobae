@@ -51,13 +51,14 @@ const bbox = new THREE.Box3().setFromBufferAttribute(geom.getAttribute("position
 const center = bbox.getCenter(new THREE.Vector3()); controls.target.copy(center);
 const radius = bbox.getBoundingSphere(new THREE.Sphere()).radius;
 function view(kind) {
-  const d = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.95;
+  const vfov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const hfov = Math.atan(Math.tan(vfov) * camera.aspect);
+  const d = Math.max(radius / Math.sin(vfov), radius / Math.sin(hfov)) * 0.9;
   if (kind === "front") { camera.position.set(center.x, center.y, center.z + d); camera.up.set(0, 1, 0); }
   if (kind === "top")   { camera.position.set(center.x, center.y + d, center.z + 1); camera.up.set(0, 0, -1); }
   if (kind === "side")  { camera.position.set(center.x + d, center.y, center.z); camera.up.set(0, 1, 0); }
   controls.update();
 }
-view("front");
 document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => view(b.dataset.view));
 
 const mat = new THREE.ShaderMaterial({
@@ -86,11 +87,11 @@ const points = new THREE.Points(geom, mat);
 scene.add(points);
 
 function resize() {
-  const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
-  renderer.setSize(innerWidth, innerHeight, false);
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-addEventListener("resize", resize); resize();
+addEventListener("resize", resize); resize(); view("front");
 
 // ---------------------------------------------------------------- ws
 let simMs = 0, rt = 0, sps = 0, frames = 0, lastFpsT = performance.now();
@@ -214,12 +215,13 @@ const proj = new THREE.Vector3();
 canvas.addEventListener("pointerdown", (e) => { canvas._down = [e.clientX, e.clientY]; });
 canvas.addEventListener("pointerup", async (e) => {
   const d = canvas._down; if (!d || Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 4) return;
-  const x = (e.clientX / innerWidth) * 2 - 1, y = -(e.clientY / innerHeight) * 2 + 1;
+  const r = canvas.getBoundingClientRect();
+  const x = ((e.clientX - r.left) / r.width) * 2 - 1, y = -((e.clientY - r.top) / r.height) * 2 + 1;
   let best = -1, bestD = 0.02 * 0.02;
   for (let i = 0; i < N; i++) {
     proj.set(pos[3*i], pos[3*i+1], pos[3*i+2]).project(camera);
     if (proj.z > 1) continue;
-    const dd = (proj.x - x) ** 2 + ((proj.y - y) * innerHeight / innerWidth) ** 2;
+    const dd = (proj.x - x) ** 2 + ((proj.y - y) * r.height / r.width) ** 2;
     if (dd < bestD) { bestD = dd; best = i; }
   }
   if (best < 0) return;
