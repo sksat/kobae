@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { createFlightView } from "./flight.js";
+import "./ui.js";
 
 const $ = (s) => document.querySelector(s);
 const MAGIC = 0x4b4f4241;
@@ -197,7 +198,7 @@ $("#clear").onclick = () => { stim({ custom: [] }); rasterSet = new Map(meta.rea
 
 // bars
 const scBars = meta.superclasses.map((s, i) => {
-  const d = document.createElement("div"); d.className = "bar";
+  const d = document.createElement("div"); d.className = meta.superclass_counts[i] < 100 ? "bar minor" : "bar";
   d.innerHTML = `<span title="${s}: ${meta.superclass_counts[i]} 細胞" style="color:${PALETTE[i % PALETTE.length]}">${scJa(s)}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
   $("#scbars").appendChild(d); return d;
 });
@@ -270,6 +271,7 @@ function setMode(m) {
   // in flight mode the 3D map moves into the right panel (same canvas, re-parented) and the
   // in-scene labels are hidden (they would float over the flight view)
   (m === "flight" ? $("#brainminibox") : $("#stage")).appendChild(canvas);
+  (m === "flight" ? $("#brainmini .sh") : $("#stage")).appendChild($("#views"));   // camera buttons follow the canvas
   labelRenderer.domElement.style.display = m === "flight" ? "none" : "";
   document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
   resize();

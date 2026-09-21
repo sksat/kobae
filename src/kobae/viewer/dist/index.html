@@ -4,32 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kobae — MaleCNS v1.0 live</title>
-  <script type="module" crossorigin src="/assets/index-DyA9ir9G.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BljmuGrD.css">
+  <script type="module" crossorigin src="/assets/index-CBdksZfg.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Db8p8etg.css">
 </head>
 <body>
 <div id="app">
-  <div id="hud">
-    <div id="title">kobae <span id="backend"></span></div><div class="btns" id="views"><button data-view="front">正面から</button><button data-view="top">上から</button><button data-view="side">横から</button></div><div class="btns" id="modes"><button data-mode="brain" class="on">脳</button><button data-mode="flight">飛行</button></div>
+  <header id="hud">
+    <button class="fold" data-fold="left" aria-label="左パネルをたたむ" title="左パネルをたたむ"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M8 2 4 6l4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <div class="brand"><span id="title">kobae</span><span id="backend"></span></div>
+    <div class="seg" id="modes"><button data-mode="brain" class="on">脳</button><button data-mode="flight">飛行</button></div>
+    <div id="transport">
+      <button id="pause">一時停止</button>
+      <button id="reset">リセット</button>
+      <label class="slider">速度 <input id="speed" type="range" min="0" max="6" step="1" value="3"><span id="speedv">1× 実時間</span></label>
+    </div>
     <div id="meters">
       <span>脳内時間 <b id="simt">0.00</b> 秒</span>
-      <span>速度 <b id="rt">–</b> 倍速（実時間比）</span>
+      <span>実時間の <b id="rt">–</b> 倍</span>
       <span>発火 <b id="sps">0</b> /秒</span>
       <span>描画 <b id="fps">0</b> fps</span>
     </div>
-  </div>
-  <div id="left">
+    <button class="fold" data-fold="right" aria-label="右パネルをたたむ" title="右パネルをたたむ"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+  </header>
+
+  <aside id="left">
+    <div class="ph">
+      <h2>刺激</h2>
+      <label class="slider">強さ <input id="gain" type="range" min="0" max="2" step="0.05" value="1"><span id="gainv">1.00</span>倍</label>
+    </div>
     <section>
-      <h3>刺激を与える</h3><div class="dim">選んだ感覚ニューロンに一定の入力を与え続けます。中央の点群は発火した細胞が白く光ります（80 ms で消える）。ドラッグで回転、ホイールで拡大、細胞をクリックで詳細。</div>
-      <div class="row"><label>刺激の強さ <input id="gain" type="range" min="0" max="2" step="0.05" value="1"><span id="gainv">1.00</span> 倍</label></div>
-      <div class="row"><label>シミュレーション速度 <input id="speed" type="range" min="0" max="6" step="1" value="3"><span id="speedv">1× 実時間</span></label></div>
-      <div class="row btns">
-        <button data-toggle="sugar">糖を舐めさせる</button>
-        <button id="pause">一時停止</button>
-        <button id="reset">リセット</button>
-      </div>
-      <h4>目に見せるもの</h4><div class="dim">左右の複眼（光受容体 3,335 個）に映す明るさのパターン。下の図はいま両目に見えているもの。</div>
-      <div class="row btns" id="visual">
+      <h3>感覚</h3>
+      <div class="chips" id="buttons"><button data-toggle="sugar">糖を舐めさせる</button></div>
+    </section>
+    <section>
+      <h3>目に見せるもの</h3>
+      <div class="chips" id="visual">
         <button data-visual="off" class="on">なし</button>
         <button data-visual="flash">全体が点滅</button>
         <button data-visual="left">左目だけ明るい</button>
@@ -40,52 +49,69 @@
         <button data-visual="external">体のカメラ</button>
       </div>
       <canvas id="retina" width="240" height="120"></canvas>
-      <h4>感覚を刺激する</h4><div class="dim">それぞれ対応する感覚ニューロン群に入力を与えます（複数同時可）。</div>
-      <div class="row btns" id="buttons"></div>
-      <h4>匂いを嗅がせる</h4><div class="dim">嗅覚受容ニューロン 2,635 個を、受容体の種類（糸球体名）ごとに刺激。複数同時可。</div>
-      <div class="row btns small" id="orn"></div>
-      <h4>細胞の種類を指定して刺激</h4><div class="dim">細胞型の名前（* でワイルドカード）で検索し、その細胞群に入力を与えます。右の発火時系列もその細胞群に切り替わります。</div>
-      <div class="row"><input id="glob" placeholder="例: DNa02* / KC*" size="16"> 強さ <input id="amp" type="number" value="30" size="3" step="5"><button id="inject">刺激</button><button id="clear">解除</button></div>
-      <div id="globinfo" class="dim"></div>
     </section>
-  </div>
-  <div id="stage">
+    <details class="sec" id="sec-odor">
+      <summary><h3>匂い</h3><span class="badge" data-count="#orn"></span><span class="note">糸球体ごと</span></summary>
+      <div class="chips code" id="orn"></div>
+    </details>
+    <section>
+      <h3>細胞の種類で指定</h3>
+      <input id="glob" placeholder="例: DNa02* / KC*" autocomplete="off" spellcheck="false">
+      <div class="row">
+        <label class="field">強さ <input id="amp" type="number" value="30" step="5"></label>
+        <button id="inject" class="primary">刺激</button>
+        <button id="clear">解除</button>
+      </div>
+      <div id="globinfo" class="note code"></div>
+    </section>
+  </aside>
+
+  <main id="stage">
     <canvas id="gl"></canvas>
+    <div class="seg" id="views"><button data-view="front">正面から</button><button data-view="top">上から</button><button data-view="side">横から</button></div>
     <div id="flight" hidden>
       <canvas id="fly"></canvas>
+      <div class="seg" id="flightviews"><button data-fview="chase">追いかけ</button><button data-fview="top">上から</button><button data-fview="side">横から</button><button data-fview="wide">引き</button></div>
+      <figure id="eyes"><canvas id="eyesbig" width="128" height="48"></canvas><figcaption>両目に映るもの</figcaption></figure>
       <div id="flighthud"><span id="flightinfo"></span></div>
-      <div id="flightviews" class="btns"><button data-fview="chase">追いかけ</button><button data-fview="top">上から</button><button data-fview="side">横から</button><button data-fview="wide">引き</button></div>
-      <canvas id="eyesbig" width="128" height="48"></canvas>
       <canvas id="minimap" width="220" height="160"></canvas>
     </div>
-  </div>
-  <div id="right">
+  </main>
+
+  <aside id="right">
     <section id="brainmini" hidden>
-      <h3>神経系（脳・腹髄）</h3><div class="dim">飛行ビューでは 3D マップをここに縮小表示。ドラッグで回転。</div>
+      <div class="sh"><h3>神経系</h3></div>
       <div id="brainminibox"></div>
     </section>
     <section>
-      <h3>領域ごとの活動</h3><div class="dim">細胞のクラスごとの平均発火率（1 細胞あたり Hz、直近 100 ms）。</div>
-      <div id="scbars"></div>
+      <div class="sh"><h3>行動の出力</h3><span class="note">Hz・左右別</span></div>
+      <div class="bars" id="readouts"></div>
     </section>
     <section>
-      <h3>行動の出力</h3><div class="dim">行動に対応することが知られている脳→体の指令ニューロンの発火率（Hz）。左右別。</div>
-      <div id="readouts"></div>
-    </section>
-    <section>
-      <h3>発火の時系列 <span class="dim" id="rasterinfo"></span></h3><div class="dim">横軸 = 直近 2 秒、縦 = 細胞 1 つずつ。点 1 つが発火 1 回。</div>
+      <div class="sh"><h3>発火の時系列</h3><span class="note" id="rasterinfo"></span></div>
       <canvas id="raster" width="360" height="160"></canvas>
+      <div class="note">直近 2 秒・1 行 = 1 細胞</div>
     </section>
+    <section>
+      <div class="sh"><h3>細胞</h3></div>
+      <div id="cellinfo" class="note">点群の細胞をクリックすると詳細がここに出ます。ドラッグで回転、ホイールで拡大。</div>
+    </section>
+    <details class="sec" id="sec-regions" open>
+      <summary><h3>領域ごとの活動</h3><span class="note">Hz / 細胞</span></summary>
+      <div class="bars" id="scbars"></div>
+    </details>
     <section id="bodysec" hidden>
-      <h3>体（flybody / MuJoCo）</h3><div class="dim">上: 追いかけカメラ。中: 左右の目（脳の網膜に入っている映像）。下: 上から見た飛行経路。</div>
-      <img id="bodycam" alt="chase camera" style="width:100%;border-radius:4px;background:#000">
-      <canvas id="bodyeyes" width="128" height="48" style="width:100%;border-radius:4px;background:#000;margin-top:4px"></canvas>
+      <div class="sh"><h3>体</h3></div>
+      <img id="bodycam" alt="">
+      <canvas id="bodyeyes" width="128" height="48"></canvas>
       <canvas id="bodypath" width="360" height="200"></canvas>
-      <div class="dim" id="bodyinfo"></div>
+      <div id="bodyinfo" class="note"></div>
     </section>
-    <section id="cellinfo" class="dim">点群の細胞をクリックすると、その細胞の情報がここに出ます</section>
-    <section id="legend" class="dim"></section>
-  </div>
+    <details class="sec" id="sec-legend">
+      <summary><h3>点の色</h3><span class="note">細胞のクラス</span></summary>
+      <div id="legend"></div>
+    </details>
+  </aside>
 </div>
 </body>
 </html>

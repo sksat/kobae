@@ -1,49 +1,184 @@
-:root { color-scheme: dark; --bg:#07090d; --panel:#0e121a; --fg:#d9dee7; --dim:#8a93a3; --acc:#7cc7ff; }
-html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px/1.4 ui-monospace, "JetBrains Mono", "BIZ UDGothic", monospace; }
-#app { position:relative; width:100vw; height:100vh; overflow:hidden; display:grid; grid-template-columns: 300px 1fr 380px; gap:8px; padding:8px; box-sizing:border-box; }
-#stage { position:relative; min-width:0; height:100%; }
-#gl { display:block; width:100%; height:100%; border-radius:8px; background:#07090d; min-width:0; }
-#flight { position:absolute; inset:0; border-radius:8px; background:#000; overflow:hidden; }
-#fly { position:absolute; inset:0; width:100%; height:100%; display:block; }
-#flightviews { position:absolute; right:12px; top:78px; z-index:5; } #flightviews button { padding:2px 8px; font-size:11px; }
-#eyesbig { position:absolute; left:12px; bottom:52px; width:30%; image-rendering:auto; border:1px solid #2b3648; border-radius:4px; background:#000; }
-#minimap { position:absolute; right:12px; bottom:12px; background:rgba(0,0,0,.6); border:1px solid #2b3648; border-radius:4px; }
-#flighthud { position:absolute; left:12px; bottom:12px; background:rgba(7,9,13,.6); padding:4px 8px; border-radius:4px; font-size:12px; }
-#modes { margin-left:14px; } #modes button { padding:2px 9px; font-size:11px; }
-#hud { position:absolute; z-index:10; background:#0e121a; left:50%; top:16px; transform:translateX(-50%); display:flex; gap:18px; align-items:baseline; background:var(--panel); padding:6px 14px; border-radius:8px; }
-#title { font-weight:700; letter-spacing:.06em; }
-#title span { color:var(--dim); font-weight:400; font-size:11px; }
-#meters span { margin-right:14px; color:var(--dim); }
-#meters b { color:var(--fg); font-weight:600; }
-#left, #right { position:static; height:100%; overflow-y:auto; background:var(--panel); border-radius:8px; padding:10px 12px; box-sizing:border-box; }
-@media (max-width:1400px){ #app{grid-template-columns: 250px 1fr 320px} }
-h3 { margin:6px 0 8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--acc); }
-h4 { margin:12px 0 4px; font-size:11px; color:var(--dim); }
-section + section { margin-top:14px; border-top:1px solid #222a36; padding-top:8px; }
-.row { margin:4px 0; }
-.btns { display:flex; flex-wrap:wrap; gap:4px; }
-.btns.small button { font-size:10px; padding:2px 5px; }
-button { background:#1a2230; color:var(--fg); border:1px solid #2b3648; border-radius:5px; padding:4px 9px; cursor:pointer; font:inherit; }
-button:hover { border-color:var(--acc); }
-button.on { background:#2a5a8a; border-color:var(--acc); }
-input[type=range] { width:170px; vertical-align:middle; }
-input[type=text], input:not([type]), input[type=number] { background:#0e131b; color:var(--fg); border:1px solid #2b3648; border-radius:4px; padding:3px 6px; font:inherit; }
-.dim { color:var(--dim); font-size:11px; }
-#retina { display:block; margin-top:6px; background:#000; border:1px solid #2b3648; border-radius:4px; width:100%; height:auto; }
-.bar { display:grid; grid-template-columns: 130px 1fr 52px; gap:6px; align-items:center; margin:2px 0; font-size:11px; }
-.bar .track { height:9px; background:#161c26; border-radius:3px; overflow:hidden; }
-.bar .fill { height:100%; background:var(--acc); width:0; transition:width .08s linear; }
-.bar .val { text-align:right; color:var(--dim); }
-#raster { display:block; width:100%; height:auto; background:#000; border:1px solid #2b3648; border-radius:4px; }
-#legend { font-size:10px; color:var(--dim); line-height:1.7; }
-#legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+/* kobae viewer
+   Warm = input (a stimulus that is switched on), cool = output (activity, bars, raster, path).
+   The chrome stays quiet so the point cloud / the fly is what you look at. */
+:root {
+  color-scheme: dark;
+  --bg: #07090d;            /* also the WebGL clear colour, see main.js */
+  --panel: #0c1017;
+  --raised: #141a25;
+  --hover: #1b2331;
+  --line: #1f2836;
+  --fg: #e2e6ee;
+  --dim: #8b95a7;
+  --faint: #59627a;
+  --act: #7cc7ff;           /* activity: bar fills, raster, flight path */
+  --stim: #ffc857;          /* stimulus on */
+  --stim-ink: #2a1d00;
+  --sans: "Noto Sans CJK JP", "Noto Sans JP", "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+  --left: 272px;
+  --right: 320px;
+  --gap: 8px;
+  --r: 6px;
+}
+@media (min-width: 1800px) { :root { --left: 300px; --right: 352px; } }
 
-#views { margin-left:14px; }
-#views button { padding:2px 7px; font-size:11px; }
-#hud { flex-wrap:wrap; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+h2, h3 { margin: 0; font-weight: 600; line-height: 1.3; }
+h2 { font-size: 14px; }
+h3 { font-size: 12.5px; }
 
-.landmark { color:#cfd6e2; font-size:12px; background:rgba(7,9,13,.55); padding:1px 6px; border-radius:4px; border:1px solid #2b3648; white-space:nowrap; }
-#labels { position:absolute; top:0; left:0; pointer-events:none; }
+/* ---------------------------------------------------------------- frame */
+#app {
+  height: 100vh; padding: var(--gap);
+  display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
+}
+#app.fold-left  { grid-template-columns: 0 minmax(0, 1fr) var(--right); }
+#app.fold-right { grid-template-columns: var(--left) minmax(0, 1fr) 0; }
+#app.fold-left.fold-right { grid-template-columns: 0 minmax(0, 1fr) 0; }
+#hud { grid-column: 1 / -1; }
+#left { grid-column: 1; } #stage { grid-column: 2; } #right { grid-column: 3; }
+#left, #stage, #right { grid-row: 2; }
+#app.fold-left #left, #app.fold-right #right { display: none; }
+#app.fold-left #stage { margin-left: 0; }
+#app.fold-right #stage { margin-right: 0; }
 
-#brainminibox { position:relative; width:100%; height:260px; border-radius:6px; overflow:hidden; background:#07090d; }
-#brainminibox canvas { width:100% !important; height:100% !important; }
+/* ---------------------------------------------------------------- top bar */
+#hud {
+  margin-bottom: var(--gap);
+  display: flex; align-items: center; gap: 16px; height: 40px; padding: 0 7px;
+  background: var(--panel); border-radius: var(--r);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#title { font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+#backend { color: var(--faint); font-size: 11px; white-space: nowrap; }
+@media (max-width: 1500px) { #backend { display: none; } }
+#transport { display: flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 16px; border-left: 1px solid var(--line); }
+#meters { display: flex; gap: 14px; padding-left: 16px; border-left: 1px solid var(--line); }
+#meters span { color: var(--dim); font-size: 11px; white-space: nowrap; }
+#meters b { color: var(--fg); font-size: 15px; font-weight: 600; margin: 0 2px; }
+#rt { display: inline-block; min-width: 3.2em; text-align: right; }
+#sps { display: inline-block; min-width: 4.6em; text-align: right; }
+#fps { display: inline-block; min-width: 1.4em; text-align: right; }
+.fold { flex: none; width: 26px; height: 26px; padding: 0; display: grid; place-items: center; background: transparent; color: var(--dim); }
+.fold:hover { color: var(--fg); background: var(--raised); }
+.fold.on svg { transform: scaleX(-1); }
+
+/* ---------------------------------------------------------------- controls */
+button {
+  font: inherit; font-size: 12px; line-height: 1.25; color: var(--fg);
+  background: var(--raised); border: 0; border-radius: var(--r); padding: 5px 10px; cursor: pointer;
+}
+button:hover { background: var(--hover); }
+button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--act); outline-offset: 1px; }
+button.primary { background: var(--stim); color: var(--stim-ink); font-weight: 600; }
+button.primary:hover { background: #ffd57a; }
+#pause.on { background: var(--fg); color: #0b0f16; font-weight: 600; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chips button.on { background: var(--stim); color: var(--stim-ink); font-weight: 600; }
+.chips.code button { font-family: var(--mono); font-size: 11px; padding: 3px 0; min-width: 42px; text-align: center; }
+.chips.code { gap: 4px; }
+
+.seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--raised); border-radius: var(--r); }
+.seg button { padding: 3px 9px; border-radius: 4px; background: transparent; color: var(--dim); }
+.seg button:hover { color: var(--fg); }
+.seg button.on { background: var(--fg); color: #0b0f16; font-weight: 600; }
+
+.slider { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.slider input { width: 110px; margin: 0; accent-color: var(--act); }
+.slider span { color: var(--fg); }
+#speedv { min-width: 5.2em; }
+#gain { width: 96px; accent-color: var(--stim); }
+#gainv { min-width: 2.6em; text-align: right; }
+
+input:not([type=range]) {
+  font: inherit; font-size: 12px; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r); padding: 5px 8px;
+}
+input:not([type=range]):focus-visible { outline-offset: -1px; border-color: transparent; }
+#glob { display: block; width: 100%; font-family: var(--mono); }
+#glob::placeholder { color: var(--faint); font-family: var(--mono); }
+.row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); margin-right: auto; }
+#amp { width: 58px; }
+#globinfo { margin-top: 6px; }
+#globinfo:empty { display: none; }
+
+/* ---------------------------------------------------------------- panels */
+#left, #right {
+  min-height: 0; overflow-y: auto; padding: 12px 14px 18px;
+  background: var(--panel); border-radius: var(--r);
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+.ph { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 12px; }
+section, details.sec { padding: 12px 0; border-top: 1px solid var(--line); }
+#right > section:first-child, #brainmini[hidden] + section { border-top: 0; padding-top: 0; }
+section > h3 { margin-bottom: 8px; }
+.sh { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.sh .note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note { color: var(--dim); font-size: 11px; line-height: 1.5; }
+.note.code { font-family: var(--mono); word-break: break-all; }
+
+summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: ""; flex: none; width: 5px; height: 5px; margin: 0 3px 0 1px;
+  border-right: 1.5px solid var(--dim); border-bottom: 1.5px solid var(--dim);
+  transform: rotate(-45deg); transition: transform .15s;
+}
+details[open] > summary::before { transform: rotate(45deg); }
+details[open] > summary { margin-bottom: 8px; }
+summary .note { margin-left: auto; }
+.badge { font-size: 11px; font-weight: 600; line-height: 17px; color: var(--stim-ink); background: var(--stim); border-radius: 9px; padding: 0 6px; min-width: 18px; text-align: center; }
+.badge:empty { display: none; }
+
+/* bars: label | track | value. Region labels carry their point-cloud colour as a swatch, not as text colour. */
+.bars { display: flex; flex-direction: column; gap: 3px; }
+.bar { display: grid; grid-template-columns: 138px 1fr 42px; gap: 8px; align-items: center; height: 16px; font-size: 11.5px; }
+.bar > span:first-child { position: relative; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; -webkit-text-fill-color: var(--fg); }
+#scbars .bar > span:first-child { padding-left: 13px; }
+#scbars .bar > span:first-child::before { content: ""; position: absolute; left: 0; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 2px; background: currentColor; }
+.bar .track { height: 6px; background: var(--raised); border-radius: 3px; overflow: hidden; }
+.bar .fill { height: 100%; width: 0; background: var(--act); border-radius: 3px; transition: width .1s linear; }
+.bar .val { text-align: right; font-size: 11px; color: var(--dim); }
+#scbars .bar.minor { display: none; }
+#scbars.all .bar.minor { display: grid; }
+button.more { margin-top: 8px; padding: 3px 8px; font-size: 11px; color: var(--dim); background: transparent; }
+button.more:hover { color: var(--fg); background: var(--raised); }
+
+#retina, #raster, #bodyeyes, #bodypath, #bodycam { display: block; width: 100%; height: auto; background: #000; border-radius: 4px; }
+#retina { margin-top: 8px; }
+#raster { margin-bottom: 4px; }
+#bodycam:not([src]) { display: none; }
+#bodyeyes, #bodypath { margin-top: 4px; }
+#bodyinfo { margin-top: 6px; }
+#cellinfo { font-size: 12px; }
+#cellinfo b { color: var(--fg); font-size: 13px; }
+
+#brainminibox { position: relative; height: 240px; border-radius: 4px; overflow: hidden; background: var(--bg); }
+#brainminibox canvas { width: 100% !important; height: 100% !important; }
+#brainmini .sh #views { flex: none; }
+
+#legend { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; color: var(--dim); }
+#legend > b, #legend > br { display: none; }
+#legend i { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; vertical-align: 0; }
+
+/* ---------------------------------------------------------------- stage */
+#stage { position: relative; min-width: 0; min-height: 0; margin: 0 var(--gap); border-radius: var(--r); overflow: hidden; background: var(--bg); }
+#gl { display: block; width: 100%; height: 100%; }
+#labels { position: absolute; top: 0; left: 0; pointer-events: none; }
+.landmark { font-size: 12px; color: #cfd6e2; background: rgba(7, 9, 13, .6); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+#stage > #views, #flightviews { position: absolute; z-index: 5; top: 10px; left: 10px; background: rgba(12, 16, 23, .8); backdrop-filter: blur(6px); }
+#flight { position: absolute; inset: 0; background: #000; }
+#fly { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#eyes { position: absolute; left: 10px; bottom: 44px; margin: 0; width: 26%; min-width: 160px; }
+#eyesbig { display: block; width: 100%; height: auto; background: #000; border-radius: 4px; }
+#eyes figcaption { position: absolute; left: 6px; top: 4px; font-size: 11px; color: rgba(226, 230, 238, .75); text-shadow: 0 0 3px #000; }
+#flighthud { position: absolute; left: 10px; bottom: 10px; padding: 4px 8px; font-size: 12px; background: rgba(12, 16, 23, .8); border-radius: 4px; backdrop-filter: blur(6px); }
+#flighthud:empty, #flightinfo:empty { display: none; }
+#minimap { position: absolute; right: 10px; bottom: 10px; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
