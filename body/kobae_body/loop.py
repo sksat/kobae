@@ -72,9 +72,14 @@ class Decoder:
         self.rates = np.zeros(len(readouts))
         self.baseline = np.zeros(len(readouts))
 
-    def update(self, rates, dt):
+    def update(self, rates, dt, baseline_tau: float = 20.0):
         a = 1 - np.exp(-dt / self.tau)
         self.rates += a * (np.asarray(rates) - self.rates)
+        # slow adaptation of the baseline (high-pass): the network has several activity regimes
+        # (e.g. the odour/sugar-driven high-activity attractor persists after the stimulus), and
+        # a baseline measured in one regime saturates the command in another
+        b = 1 - np.exp(-dt / baseline_tau)
+        self.baseline += b * (self.rates - self.baseline)
 
     def rate(self, typ, side=None):
         return sum(r - b for r, b, ro in zip(self.rates, self.baseline, self.readouts)
