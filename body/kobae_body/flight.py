@@ -42,19 +42,23 @@ class NumpyPolicy:
         self.act_dim = self.mean_w.shape[1]
 
     def __call__(self, obs: np.ndarray) -> np.ndarray:
+        """Acme LayerNormMLP: Linear -> LayerNorm -> tanh, then Linear -> ELU (activate_final=True),
+        then MultivariateNormalDiagHead with tanh_mean=False: the mean is a plain Linear output,
+        clipped to [-1, 1] by the environment's CanonicalSpecWrapper."""
         x = obs.astype(np.float32)
         h = x @ self.w[0] + self.b[0]
         mu = h.mean(-1, keepdims=True); var = h.var(-1, keepdims=True)
         h = (h - mu) / np.sqrt(var + 1e-5) * self.ln_scale + self.ln_offset
         h = np.tanh(h)
         for k in range(1, self.n_hidden):
-            h = np.tanh(h @ self.w[k] + self.b[k])
-        return np.tanh(h @ self.mean_w + self.mean_b)  # DMPO head: tanh-squashed mean in [-1, 1]
+            z = h @ self.w[k] + self.b[k]
+            h = np.where(z > 0, z, np.expm1(z))   # ELU
+        return np.clip(h @ self.mean_w + self.mean_b, -1.0, 1.0)
 
 
 def flatten_obs(obs: dict) -> np.ndarray:
-    """Acme batch_concat order: dict keys in their (sorted OrderedDict) order, each flattened."""
-    return np.concatenate([np.asarray(obs[k], dtype=np.float32).ravel() for k in obs.keys()])
+    """Acme batch_concat uses tree.flatten, which visits dict keys in SORTED order."""
+    return np.concatenate([np.asarray(obs[k], dtype=np.float32).ravel() for k in sorted(obs.keys())])
 
 
 def canonical_to_real(a: np.ndarray, spec) -> np.ndarray:
