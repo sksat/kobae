@@ -10,3 +10,5 @@ outputs/
 eval/
 body/.venv/
 body/uv-sync.log
+body/vendor/
+body/policies/
