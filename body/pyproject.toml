@@ -1,0 +1,15 @@
+[project]
+name = "kobae-body"
+version = "0.1.0"
+description = "flybody (MuJoCo) fly body + flight policy coupled to the kobae brain server"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mujoco>=3.9,<3.10",
+  "dm_control",
+  "numpy",
+  "flybody @ git+https://github.com/TuragaLab/flybody.git",
+  "tensorflow-cpu",
+  "websockets",
+  "pillow",
+  "mediapy",
+]
