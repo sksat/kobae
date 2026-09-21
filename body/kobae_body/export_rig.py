@@ -19,7 +19,7 @@ from .flight import FlightBody
 
 
 def main(out: str, max_tris: int = 40000):
-    body = FlightBody("policies/flight.npz", "../data/flybody/wing_pattern_fmech.npy")
+    body = FlightBody("policies/flight.npz", "../data/flybody/wing_pattern_fmech.npy", kinematic=True, legs=True)
     m = body.physics.model.ptr
     name = lambda t, i: mujoco.mj_id2name(m, t, i) or ""
     bodies = [{"id": i, "name": name(mujoco.mjtObj.mjOBJ_BODY, i), "parent": int(m.body_parentid[i])} for i in range(m.nbody)]

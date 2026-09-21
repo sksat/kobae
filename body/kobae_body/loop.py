@@ -28,6 +28,7 @@ import websockets
 from PIL import Image
 
 from .flight import FlightBody
+from .behavior import Behaviour
 
 MAGIC = 0x4B4F4241
 
@@ -96,7 +97,8 @@ class Decoder:
 
 async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool, mode: str = "bci",
               camera: str = "walker/track2", video_fps: int = 30, body_mode: str = "kinematic", realtime: bool = True):
-    body = FlightBody(policy, wpg, kinematic=(body_mode == "kinematic"))
+    body = FlightBody(policy, wpg, kinematic=(body_mode == "kinematic"), legs=(body_mode == "kinematic"))
+    behaviour = Behaviour(body) if body_mode == "kinematic" else None
     import mujoco
     m = body.physics.model.ptr
     walker_ids = [i for i in range(m.nbody) if (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) or "").startswith("walker/")]
@@ -129,7 +131,10 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
         # the brain advances exactly the body's elapsed time, so brain time == body time
         STEP_S = 0.009
         while time.perf_counter() - t_start < seconds:
-            body.step(45); sim_body += STEP_S
+            flying = behaviour.update(STEP_S) if behaviour else True
+            if flying:
+                body.step(45)
+            sim_body += STEP_S
             left, right = body.eyes(64, 48)
             lum = luminance_from_eyes(left, right, uv)
             rgb = np.concatenate([left, right], axis=1)
@@ -142,8 +147,11 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                     if m.get("op") == "readouts":
                         dec.update(m["rates"], STEP_S); break
             speed, yaw = dec.command()
-            body.command.speed, body.command.yaw = speed, yaw
             p, q = body.body_pose()
+            if flying:
+                body.command.speed, body.command.yaw = speed, yaw
+                # hold a cruising height (the perches walk up the pillars): gentle descent/climb toward 1.5 cm
+                body.command.climb = float(np.clip(0.4 * (1.5 - p[2]), -3.0, 3.0))
             it = int(round(sim_body / STEP_S))
             now = time.perf_counter()
             if now - last_relay >= 1 / 20:   # 20 Hz wall-clock relay to the viewer: poses of all fly bodies + both eyes
@@ -152,8 +160,9 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                 eyes = np.concatenate([left, right], axis=1)
                 ebuf = io.BytesIO(); Image.fromarray(eyes).save(ebuf, format="JPEG", quality=60)
                 eb = ebuf.getvalue()
+                st = {"FLY": 0, "LAND": 1, "PERCH": 2, "TAKEOFF": 3}.get(behaviour.state if behaviour else "FLY", 0)
                 hdr = b"KOBP" + struct.pack("<7fII", sim_body, float(p[0]), float(p[1]), float(p[2]),
-                                            float(2 * np.arctan2(q[3], q[0])), speed, yaw, len(walker_ids), len(eb))
+                                            float(2 * np.arctan2(q[3], q[0])), speed, yaw, len(walker_ids), len(eb) | (st << 28))
                 await ws.send(hdr + walker_ids.astype(np.uint16).tobytes() + poses.tobytes() + eb)
             if realtime:   # live view: do not run the body faster than real time
                 lag = sim_body - (time.perf_counter() - t_start)
@@ -168,7 +177,7 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                 frames.append(fr)
             if verbose and it % 56 == 0:
                 p, _ = body.body_pose()
-                print(f"body {sim_body:5.2f}s  pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f} crashes {body.relaunches}  "
+                print(f"body {sim_body:5.2f}s {behaviour.state if behaviour else 'MUJOCO':7s} pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f} crashes {body.relaunches}  "
                       f"DNp20 L/R {dec.rate('DNp20','L'):.0f}/{dec.rate('DNp20','R'):.0f} DNpe017 {dec.rate('DNpe017'):.0f} "
                       f"DNa02 L/R {dec.rate('DNa02','L'):.0f}/{dec.rate('DNa02','R'):.0f}  brain {m['sim_ms']/1000:.2f}s  wall/body {(time.perf_counter()-t_start)/sim_body:.1f}x")
     if video and frames:

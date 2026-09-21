@@ -304,7 +304,7 @@ function onBodyBinary(buf, dv) {
   const t = dv.getFloat32(4, true), pos = [dv.getFloat32(8, true), dv.getFloat32(12, true), dv.getFloat32(16, true)];
   const yaw = dv.getFloat32(20, true), cmd = [dv.getFloat32(24, true), dv.getFloat32(28, true)];
   if (magic === 0x50424f4b) {   // 'KOBP': poses + eyes
-    const nb = dv.getUint32(32, true), el = dv.getUint32(36, true);
+    const nb = dv.getUint32(32, true), elst = dv.getUint32(36, true), el = elst & 0x0fffffff, st = elst >>> 28;
     const ids = new Uint16Array(buf, 40, nb);
     const poses = new Float32Array(nb * 7);
     poses.set(new Float32Array(buf.slice(40 + nb * 2, 40 + nb * 2 + nb * 28)));
@@ -316,7 +316,7 @@ function onBodyBinary(buf, dv) {
       const eyes = new Blob([new Uint8Array(buf, 40 + nb * 2 + nb * 28, el)], { type: "image/jpeg" });
       createImageBitmap(eyes).then(bm => { for (const id of ["eyesbig", "bodyeyes"]) { const c = $("#" + id); if (c.width !== bm.width) { c.width = bm.width; c.height = bm.height; } c.getContext("2d").drawImage(bm, 0, 0); } bm.close(); });
     }
-    onBody({ t, pos, yaw, cmd });
+    onBody({ t, pos, yaw, cmd, state: ["飛行", "着地", "歩行", "離陸"][st] || "" });
     return;
   }
   const jl = dv.getUint32(32, true), el = dv.getUint32(36, true);
@@ -334,7 +334,7 @@ function onBody(m) {
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
   drawPath($("#bodypath"), m, 360, 200); drawPath($("#minimap"), m, 220, 160);
   if (m.cmd) {
-    const txt = `体の時間 ${(m.t ?? 0).toFixed(2)} s · 前進 ${m.cmd[0].toFixed(1)} cm/s · 旋回 ${m.cmd[1].toFixed(2)} rad/s · 高さ ${(m.pos?.[2] ?? 0).toFixed(1)} cm`;
+    const txt = `${m.state ? m.state + " · " : ""}体の時間 ${(m.t ?? 0).toFixed(1)} s · 前進 ${m.cmd[0].toFixed(1)} cm/s · 旋回 ${m.cmd[1].toFixed(2)} rad/s · 高さ ${(m.pos?.[2] ?? 0).toFixed(1)} cm`;
     $("#bodyinfo").textContent = txt; $("#flightinfo").textContent = txt;
   }
 }

@@ -116,12 +116,14 @@ class FlightBody:
 
     def __init__(self, policy_path: str | Path, wpg_pattern_path: str | None = None,
                  horizon_steps: int = 50, future_steps: int = 5, seed: int = 0, buffer_s: float = 30.0,
-                 kinematic: bool = False):
+                 kinematic: bool = False, legs: bool = False):
         """``kinematic``: no dynamics; the fly is placed on the reference trajectory every step and the
-        wings follow the pattern generator. ~100x cheaper than the MuJoCo flight (real-time live view)."""
+        wings follow the pattern generator. ~100x cheaper than the MuJoCo flight (real-time live view).
+        ``legs``: keep the leg joints (kinematic only; the flight policy was trained without them)."""
         self.kinematic = kinematic
+        self.legs = legs and kinematic
         self.env = flight_imitation(None, wpg_pattern_path, future_steps=future_steps,
-                                    terminal_com_dist=float("inf"),
+                                    terminal_com_dist=float("inf"), disable_legs=not self.legs,
                                     random_state=np.random.RandomState(seed))
         self.env._time_limit = float("inf")
         add_scenery(self.env.task._arena.mjcf_model, seed=seed)
@@ -154,6 +156,13 @@ class FlightBody:
         rj = self.physics.bind(mjcf.get_frame_freejoint(task._walker.mjcf_model))
         self._root_q, self._root_v = int(rj.qposadr), int(rj.dofadr)
         self._wing_q = np.asarray(self.physics.bind(task._wing_joints).qposadr)
+        self._wing_folded = self.physics.data.qpos[self._wing_q].copy()
+        if self.legs:
+            lj = self.physics.bind(task._leg_joints)
+            self._leg_q = np.asarray(lj.qposadr)
+            self._leg_names = [j.name for j in task._leg_joints]
+            self._leg_retracted = np.asarray(task._leg_springrefs, dtype=np.float64)
+            self.physics.data.qpos[self._leg_q] = self._leg_retracted
         self._renderer = None   # the model may have been recompiled
 
     def _hide_helpers(self):
@@ -256,6 +265,60 @@ class FlightBody:
         mujoco.mj_forward(self.physics.model.ptr, d.ptr)
         self.wall += time.perf_counter() - t0
         return self.timestep
+
+    # ---- direct pose control (kinematic behaviours: landing, perching, take-off) ------------
+    def place(self, pos, quat, wings="folded", legs=None, advance_s: float = 0.0):
+        """Put the fly at pos/quat, set wings (folded | beat) and leg joint angles; advance time."""
+        import mujoco
+        d = self.physics.data; task = self.env.task
+        d.qpos[self._root_q:self._root_q + 3] = pos; d.qpos[self._root_q + 3:self._root_q + 7] = quat
+        d.qvel[self._root_v:self._root_v + 6] = 0
+        if wings == "beat":
+            d.qpos[self._wing_q] = task._wbpg.step(ctrl_freq=task._wbpg.base_beat_freq)
+        else:
+            d.qpos[self._wing_q] = self._wing_folded
+        if self.legs and legs is not None:
+            d.qpos[self._leg_q] = legs
+        if advance_s:
+            n = int(round(advance_s / CONTROL_DT)); d.time += n * CONTROL_DT; task._step_counter += n; self.t += n
+        mujoco.mj_forward(self.physics.model.ptr, d.ptr)
+
+    def reseed_reference(self, pos, quat):
+        """Restart the reference trajectory from pos/quat (after a perch); keeps the step counter."""
+        k = self.env.task._step_counter
+        if k + self.horizon + self.future + 4 > len(self.ref_qpos):
+            grow = len(self.ref_qpos)
+            self.ref_qpos = np.concatenate([self.ref_qpos, np.zeros((grow, 7))]); self.ref_qvel = np.concatenate([self.ref_qvel, np.zeros((grow, 6))])
+            self.env.task._ref_qpos = self.ref_qpos; self.env.task._ref_qvel = self.ref_qvel
+        self.ref_qpos[k, :3] = pos; self.ref_qpos[k, 3:] = quat; self.ref_qvel[k] = 0
+        self.filled = k + 1
+        self._extend(self.horizon + self.future + 2)
+
+    def pillars(self):
+        """[(x, y, radius, half_height)] of the arena pillars, from the compiled model."""
+        import mujoco
+        m = self.physics.model.ptr; out = []
+        for g in range(m.ngeom):
+            n = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+            if n.startswith("pillar"):
+                out.append((float(m.geom_pos[g][0]), float(m.geom_pos[g][1]), float(m.geom_size[g][0]), float(m.geom_size[g][1])))
+        return out
+
+    def leg_gait(self, phase: float, amp: float = 0.35):
+        """Procedural tripod gait around the standing pose (joint angle 0): returns leg qpos.
+        Not a measured gait; an animation so that a perched fly visibly walks."""
+        q = np.zeros(len(self._leg_q))
+        for i, name in enumerate(self._leg_names):
+            leg = name.split("_")[-2]; side = name.split("_")[-1]
+            tripod = 0.0 if (leg, side) in (("T1", "left"), ("T2", "right"), ("T3", "left")) else np.pi
+            ph = phase + tripod
+            if name.startswith("coxa_T") or name.startswith("coxa_twist"):
+                q[i] = amp * np.sin(ph) * (1 if side == "left" else -1)
+            elif name.startswith("femur_T") or name.startswith("femur_twist"):
+                q[i] = -0.5 * amp * max(0.0, np.sin(ph + np.pi / 2))
+            elif name.startswith("tibia"):
+                q[i] = 0.6 * amp * max(0.0, np.sin(ph + np.pi / 2))
+        return q
 
     # ---- readouts for the coupling ----------------------------------------------
     @property
