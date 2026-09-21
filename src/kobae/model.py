@@ -26,3 +26,9 @@ LAMINA_TONIC = 12.0
 def luminance_drive(lum: float) -> float:
     """Photoreceptor current for a [0,1] luminance (saturating, DOOMFLY)."""
     return 30.0 * lum / (0.02 + lum)
+
+# Stage 2: superclasses simulated as graded (non-spiking) units when --graded is on.
+# ol_intrinsic (lamina, medulla, T4/T5 ...) and ol_sensory (photoreceptors) are graded in vivo;
+# visual projection neurons (LC, LPLC, MeTu ...) spike and are left as LIF.
+GRADED_SUPERCLASSES = ("ol_intrinsic", "ol_sensory")
+GRADED_FMAX_HZ = 200.0   # output rate 1.0 == this many spike-equivalents per second

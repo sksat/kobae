@@ -33,7 +33,7 @@ struct Params {
   thr: f32,
   rfc: f32,
   inv_scale: f32,
-  _p1: f32,
+  graded_gain: f32,    // fixed-point units delivered per batch per unit rate: G_SCALE * f_max * batch_s
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -51,6 +51,13 @@ struct Params {
 @group(0) @binding(11) var<storage, read_write> counts: array<u32>;
 // observation ring: (batch, packed) pairs; written by integrate, read + rewound by the host
 @group(0) @binding(12) var<storage, read_write> ring: array<vec2<u32>>;
+// stage 2 (graded optic lobe): kind[i] = 1 for graded cells (no spikes; continuous output rate)
+@group(0) @binding(13) var<storage, read> kind: array<u32>;
+@group(0) @binding(14) var<storage, read_write> rate: array<f32>;     // [n] graded output in [0,1]
+// CSC restricted to edges whose presynaptic cell is graded: gptr[n+1], gpre, gwq
+@group(0) @binding(15) var<storage, read> gptr: array<u32>;
+@group(0) @binding(16) var<storage, read> gpre: array<u32>;
+@group(0) @binding(17) var<storage, read> gwq: array<i32>;
 // indirect dispatch args for scatter; bound in its own group so it is not a storage
 // binding of the scatter dispatch (wgpu forbids STORAGE_READ_WRITE + INDIRECT in one scope)
 @group(1) @binding(0) var<storage, read_write> indirect: array<u32>;
@@ -64,6 +71,7 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
   var r = refr[i];
   let d = drive[i];
   let batch = atomicLoad(&ctl[6]);
+  let graded = kind[i] == 1u;
   var c = 0u;
   for (var s = 0u; s < P.delay; s = s + 1u) {
     if (r > 0) { r = r - 1; }
@@ -71,7 +79,7 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (r == 0) {
       vi = P.rest + (vi - P.rest) * P.av + d * (1.0 - P.av) + gi * P.coupling;
       gi = gi * P.ag;
-      if (vi > P.thr) {
+      if (vi > P.thr && !graded) {
         spiked = true;
         c = c + 1u;
         let packed = (i << 5u) | s;
@@ -85,10 +93,31 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (r == 0) { gi = gi + f32(a) * P.inv_scale; }
     if (spiked) { vi = P.rest; gi = 0.0; r = i32(P.rfc); }
   }
+  if (graded) {
+    // graded cells: clamp the membrane so a strongly driven cell saturates instead of running away
+    vi = min(vi, P.thr + (P.thr - P.rest));
+    rate[i] = clamp((vi - P.rest) / (P.thr - P.rest), 0.0, 1.0);
+  }
   v[i] = vi;
   g[i] = gi;
   refr[i] = r;
   counts[i] = counts[i] + c;
+}
+
+// stage 2: pull the graded inputs of every cell (fixed order -> deterministic) and lump one batch's
+// worth of continuous transmission into substep 0 of the next batch
+@compute @workgroup_size(64)
+fn graded_gather(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let j = gid.x;
+  if (j >= P.n) { return; }
+  let e1 = gptr[j + 1u];
+  var acc = 0.0;
+  for (var e = gptr[j]; e < e1; e = e + 1u) {
+    acc = acc + f32(gwq[e]) * rate[gpre[e]];
+  }
+  if (acc != 0.0) {
+    atomicAdd(&gin[j], i32(round(acc * P.graded_gain)));
+  }
 }
 
 @compute @workgroup_size(1)

@@ -20,11 +20,13 @@ def main(argv=None):
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--backend", choices=["cpu", "gpu"], default="cpu")
+    s.add_argument("--graded", action="store_true", help="stage 2: optic lobe as graded units (gpu only)")
     b2 = sub.add_parser("bench", help="realtime-factor benchmark")
     b2.add_argument("--graph", type=Path, default=OUT)
     b2.add_argument("--backend", choices=["gpu", "cpu", "both"], default="gpu")
     b2.add_argument("--sim-s", type=float, default=2.0)
     b2.add_argument("--out", type=Path, default=None)
+    b2.add_argument("--graded", action="store_true")
     v = sub.add_parser("validate", help="GPU vs CPU reference")
     v.add_argument("--graph", type=Path, default=OUT)
     v.add_argument("--protocol", default="sugar")
@@ -36,7 +38,7 @@ def main(argv=None):
         build(args.data, args.out, verify=not args.no_verify)
     elif args.cmd == "serve":
         from .server import serve
-        serve(args.graph, args.host, args.port, args.backend)
+        serve(args.graph, args.host, args.port, args.backend, graded=args.graded)
     elif args.cmd == "bench":
         import json, platform, socket
         from .graph import Graph
@@ -44,7 +46,7 @@ def main(argv=None):
         G = Graph(args.graph)
         res = []
         if args.backend in ("gpu", "both"):
-            res += bench_gpu(G, sim_s=args.sim_s)
+            res += bench_gpu(G, sim_s=args.sim_s, graded=args.graded)
         if args.backend in ("cpu", "both"):
             res += bench_cpu(G, sim_s=min(args.sim_s, 1.0))
         if args.out:

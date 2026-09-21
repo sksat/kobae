@@ -40,13 +40,14 @@ MAX_BATCHES_PER_FRAME = 400         # 720 ms of simulation per display frame at 
 
 
 class Engine(threading.Thread):
-    def __init__(self, G: Graph, backend: str = "cpu", fps_cap: float = 60.0):
+    def __init__(self, G: Graph, backend: str = "cpu", fps_cap: float = 60.0, graded: bool = False):
         super().__init__(daemon=True)
         self.G = G
         self.backend = backend
+        self.graded_mask = np.isin(G.superclass, M.GRADED_SUPERCLASSES) if (graded and backend == "gpu") else None
         if backend == "gpu":
             from .gpu import GpuBrain
-            self.brain = GpuBrain(G)
+            self.brain = GpuBrain(G, graded=self.graded_mask, graded_fmax_hz=M.GRADED_FMAX_HZ)
         else:
             from .cpu import CpuBrain
             self.brain = CpuBrain(G)
@@ -98,6 +99,12 @@ class Engine(threading.Thread):
             if self.backend == "gpu":
                 b.run(k, sync=True)
                 counts = b.read_counts(clear=True)
+                if self.graded_mask is not None:
+                    # graded cells never spike: report them as "active" when their output rate is high,
+                    # and fold rate*f_max into the per-cell rate estimate so the bars are comparable
+                    rate = b.read_rate()
+                    counts = counts.astype(np.float64)
+                    counts[self.graded_mask] = rate[self.graded_mask] * M.GRADED_FMAX_HZ * (k * BATCH_MS / 1000.0)
             else:
                 k = 1 if speed <= 0 else k
                 counts, _, _ = b.run(k * M.DELAY_STEPS)
@@ -115,7 +122,7 @@ class Engine(threading.Thread):
             np.add.at(self.sc_rate, np.arange(len(self.sc_names)), 0)  # keep dtype
             self.sc_rate = np.bincount(self.sc_index, weights=self.cell_rate, minlength=len(self.sc_names)).astype(np.float32) / self.sc_count
             self.ro_rate = self.cell_rate[self.ro_idx].astype(np.float32)
-            ids = np.flatnonzero(counts).astype(np.uint32)
+            ids = np.flatnonzero(counts >= (0.5 if self.graded_mask is None else 0.5)).astype(np.uint32)
             frame = struct.pack("<IffIIIIIf", MAGIC, self.sim_ms, self.rt, int(counts.sum()),
                                 len(ids), len(self.sc_rate), len(self.ro_rate), len(lum), dt_frame) \
                 + ids.tobytes() + self.sc_rate.tobytes() + self.ro_rate.tobytes() + lum.astype(np.float32).tobytes()
@@ -160,7 +167,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
             "superclass_counts": engine.sc_count.astype(int).tolist(),
             "readouts": engine.readouts, "buttons": {k: v[0] for k, v in BUTTONS.items()},
             "orn": {k: int(len(v)) for k, v in engine.stim.orn.items()},
-            "measured_positions": int(measured.sum()), "backend": engine.backend,
+            "measured_positions": int(measured.sum()), "backend": engine.backend + ("+graded" if engine.graded_mask is not None else ""),
             "retina": int(len(G.retina)), "uv": G.uv.astype(np.float32).ravel().tolist(),
             "state": engine.stim.state, "dt_ms": M.DT_MS, "batch_ms": BATCH_MS, "speed": engine.speed,
             "landmarks": landmarks,
@@ -267,9 +274,9 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
     return app
 
 
-def serve(graph_path: Path, host: str, port: int, backend: str):
+def serve(graph_path: Path, host: str, port: int, backend: str, graded: bool = False):
     G = Graph(graph_path)
-    engine = Engine(G, backend=backend)
+    engine = Engine(G, backend=backend, graded=graded)
     engine.start()
     static_dir = Path(__file__).parent / "viewer" / "dist"
     app = make_app(G, engine, static_dir)

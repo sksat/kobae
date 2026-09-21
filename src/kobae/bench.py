@@ -17,9 +17,14 @@ from . import model as M
 from .validate import protocol_drive
 
 
-def bench_gpu(G, protocols=("idle", "sugar", "visual"), sim_s: float = 2.0, warm_s: float = 2.0, verbose=True) -> list[dict]:
+def graded_mask(G):
+    return np.isin(G.superclass, M.GRADED_SUPERCLASSES)
+
+
+def bench_gpu(G, protocols=("idle", "sugar", "visual"), sim_s: float = 2.0, warm_s: float = 2.0, verbose=True,
+              graded: bool = False) -> list[dict]:
     from .gpu import GpuBrain
-    gpu = GpuBrain(G, verbose=verbose)
+    gpu = GpuBrain(G, verbose=verbose, graded=graded_mask(G) if graded else None, graded_fmax_hz=M.GRADED_FMAX_HZ)
     out = []
     for proto in protocols:
         gpu.reset_state()
@@ -32,8 +37,11 @@ def bench_gpu(G, protocols=("idle", "sugar", "visual"), sim_s: float = 2.0, warm
         wall = time.perf_counter() - t
         counts = gpu.read_counts(clear=True)
         sim = batches * M.DELAY_STEPS * M.DT_MS / 1000
-        r = {"backend": "gpu", "device": gpu.info.get("device"), "protocol": proto, "sim_s": sim, "wall_s": round(wall, 3),
-             "realtime_x": round(sim / wall, 3), "spikes_per_s": int(counts.sum() / sim), "active_cells": int((counts > 0).sum())}
+        r = {"backend": "gpu" + ("+graded" if graded else ""), "device": gpu.info.get("device"), "protocol": proto, "sim_s": sim,
+             "wall_s": round(wall, 3), "realtime_x": round(sim / wall, 3), "spikes_per_s": int(counts.sum() / sim),
+             "active_cells": int((counts > 0).sum())}
+        if graded:
+            rate = gpu.read_rate(); r["graded_mean_rate"] = round(float(rate[gpu.graded].mean()), 4)
         out.append(r)
         if verbose:
             print(json.dumps(r))
