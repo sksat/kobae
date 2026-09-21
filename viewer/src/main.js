@@ -126,7 +126,9 @@ function connect() {
       return;
     }
     const dv = new DataView(ev.data);
-    if (dv.getUint32(0, true) !== MAGIC) return;
+    const magic = dv.getUint32(0, true);
+    if (magic === 0x42424f4b) { onBodyBinary(ev.data, dv); return; }   // 'KOBB'
+    if (magic !== MAGIC) return;
     simMs = dv.getFloat32(4, true); rt = dv.getFloat32(8, true);
     const total = dv.getUint32(12, true), nIds = dv.getUint32(16, true), nSc = dv.getUint32(20, true), nRo = dv.getUint32(24, true), nRet = dv.getUint32(28, true);
     const frameSimS = dv.getFloat32(32, true);
@@ -139,11 +141,11 @@ function connect() {
       const i = ids[k]; lastSpike[i] = simMs;
       const r = rasterSet.get(i); if (r !== undefined) raster.push(simMs, r);
     }
-    if (nIds) lastAttr.needsUpdate = true;
+    if (nIds && mode !== "flight") lastAttr.needsUpdate = true;
     sps = 0.8 * sps + 0.2 * (total / Math.max(frameSimS, 1e-6));
     while (raster.length > 60000) raster.splice(0, 2);
   };
-  ws.onopen = () => { while (pending.length) ws.send(JSON.stringify(pending.shift())); };
+  ws.onopen = () => { ws.send(JSON.stringify({ op: "body_sub", value: true })); while (pending.length) ws.send(JSON.stringify(pending.shift())); };
   ws.onclose = () => setTimeout(connect, 1000);
 }
 connect();
@@ -278,11 +280,22 @@ function drawPath(canvas, m, W, H) {
   if (m.yaw !== undefined) { c.strokeStyle = "#ffe36b"; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 12 * Math.cos(m.yaw), y - 12 * Math.sin(m.yaw)); c.stroke(); }
   c.fillStyle = "#cfd6e2"; c.font = "10px ui-monospace"; c.fillText(`飛行経路 ${span.toFixed(0)} cm`, 6, H - 6);
 }
+let chaseUrl = null, eyesUrl = null;
+function onBodyBinary(buf, dv) {
+  const t = dv.getFloat32(4, true), pos = [dv.getFloat32(8, true), dv.getFloat32(12, true), dv.getFloat32(16, true)];
+  const yaw = dv.getFloat32(20, true), cmd = [dv.getFloat32(24, true), dv.getFloat32(28, true)];
+  const jl = dv.getUint32(32, true), el = dv.getUint32(36, true);
+  const jpeg = new Blob([new Uint8Array(buf, 40, jl)], { type: "image/jpeg" });
+  const eyes = new Blob([new Uint8Array(buf, 40 + jl, el)], { type: "image/jpeg" });
+  if (chaseUrl) URL.revokeObjectURL(chaseUrl); if (eyesUrl) URL.revokeObjectURL(eyesUrl);
+  chaseUrl = URL.createObjectURL(jpeg); eyesUrl = URL.createObjectURL(eyes);
+  onBody({ t, pos, yaw, cmd, chaseUrl, eyesUrl });
+}
 function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
   if (!bodySeen) { bodySeen = true; setMode("flight"); }
-  if (m.jpeg) { const src = "data:image/jpeg;base64," + m.jpeg; $("#bodycam").src = src; $("#chase").src = src; }
-  if (m.eyes) { const src = "data:image/jpeg;base64," + m.eyes; $("#bodyeyes").src = src; $("#eyesbig").src = src; }
+  if (m.chaseUrl) { if (mode === "flight") $("#chase").src = m.chaseUrl; else $("#bodycam").src = m.chaseUrl; }
+  if (m.eyesUrl) { if (mode === "flight") $("#eyesbig").src = m.eyesUrl; else $("#bodyeyes").src = m.eyesUrl; }
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
   drawPath($("#bodypath"), m, 360, 200); drawPath($("#minimap"), m, 220, 160);
   if (m.cmd) {
@@ -294,10 +307,12 @@ function onBody(m) {
 // ---------------------------------------------------------------- loop
 function tick() {
   requestAnimationFrame(tick);
-  controls.update();
-  mat.uniforms.uNow.value = simMs;
-  renderer.render(scene, camera);
-  labelRenderer.render(scene, camera);
+  if (mode !== "flight") {          // the point cloud is hidden in flight mode: do not render it
+    controls.update();
+    mat.uniforms.uNow.value = simMs;
+    renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
+  }
   frames++;
   const now = performance.now();
   if (now - lastFpsT > 500) {

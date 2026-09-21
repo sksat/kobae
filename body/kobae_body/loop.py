@@ -18,7 +18,6 @@ import json
 import struct
 import time
 
-import base64
 import io
 
 import numpy as np
@@ -114,15 +113,15 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
             body.command.speed, body.command.yaw = speed, yaw
             p, q = body.body_pose()
             it = int(round(sim_body * 100))
-            if it % 5 == 0:   # 20 Hz relay to the viewer: chase camera + both eyes
-                chase = body.render(camera_id=camera, width=640, height=480)
+            if it % 10 == 0:   # 10 Hz relay to the viewer: binary frame, chase camera + both eyes
+                chase = body.render(camera_id=camera, width=480, height=360)
                 eyes = np.concatenate([left, right], axis=1)
-                buf = io.BytesIO(); Image.fromarray(chase).save(buf, format="JPEG", quality=70)
-                ebuf = io.BytesIO(); Image.fromarray(eyes).save(ebuf, format="JPEG", quality=70)
-                await ws.send(json.dumps({"op": "body", "jpeg": base64.b64encode(buf.getvalue()).decode(),
-                                          "eyes": base64.b64encode(ebuf.getvalue()).decode(),
-                                          "pos": [float(p[0]), float(p[1]), float(p[2])],
-                                          "yaw": float(2 * np.arctan2(q[3], q[0])), "cmd": [speed, yaw], "t": sim_body}))
+                buf = io.BytesIO(); Image.fromarray(chase).save(buf, format="JPEG", quality=60)
+                ebuf = io.BytesIO(); Image.fromarray(eyes).save(ebuf, format="JPEG", quality=60)
+                jb, eb = buf.getvalue(), ebuf.getvalue()
+                hdr = b"KOBB" + struct.pack("<7fII", sim_body, float(p[0]), float(p[1]), float(p[2]),
+                                            float(2 * np.arctan2(q[3], q[0])), speed, yaw, len(jb), len(eb))
+                await ws.send(hdr + jb + eb)
             if video is not None and it % frame_every == 0 and len(frames) < 6000:
                 fr = body.render(camera_id=camera, width=640, height=480)
                 # picture-in-picture: the two eyes (what the brain sees) top-left

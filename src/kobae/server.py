@@ -9,7 +9,9 @@ Endpoints
   GET  /api/search?q=glob     JSON: cell types matching a glob (count per type)
   WS   /ws                    server -> client binary frames; client -> server JSON commands:
                               {op:stim, patch}, {op:speed, value}, {op:pause, value}, {op:reset},
-                              {op:retina, lum:[..]} (body -> brain), {op:readouts} -> {op:readouts, rates}
+                              {op:retina, lum:[..]} (body -> brain), {op:readouts} -> {op:readouts, rates},
+                              {op:body_sub, value} (viewer wants body frames). Body frames are binary
+                              messages starting with 'KOBB' (see body/kobae_body/loop.py) relayed verbatim.
 
 Frame (binary, little endian):
   u32 magic 0x4B4F4241 ('KOBA'), f32 sim_ms, f32 realtime_x, u32 total_spikes_in_frame,
@@ -154,6 +156,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
         "右目": centroid((sc == "ol_intrinsic") & (G.soma_side == "R")),
     }
     clients: set[web.WebSocketResponse] = set()
+    body_subs: set[web.WebSocketResponse] = set()   # viewers that want body frames
 
     async def index(request):
         f = static_dir / "index.html"
@@ -205,6 +208,13 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
         await sock.send_str(json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused, "speed": engine.speed}))
         try:
             async for msg in sock:
+                if msg.type == web.WSMsgType.BINARY and len(msg.data) >= 4 and msg.data[:4] == b"KOBB":
+                    # body process -> subscribed viewers: binary body frame, relayed as-is
+                    for c in list(body_subs):
+                        if c is not sock:
+                            try: await c.send_bytes(msg.data)
+                            except Exception: body_subs.discard(c)
+                    continue
                 if msg.type == web.WSMsgType.TEXT:
                     cmd = json.loads(msg.data)
                     if cmd.get("op") == "stim":
@@ -220,14 +230,8 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                                 engine.stim.state["visual"] = "external"
                                 engine._dirty = True
                         continue
-                    elif cmd.get("op") == "body":
-                        # body process -> viewers: camera jpeg (base64) + pose; relayed as-is
-                        relay = json.dumps({"op": "body", "jpeg": cmd.get("jpeg"), "eyes": cmd.get("eyes"), "pos": cmd.get("pos"),
-                                            "yaw": cmd.get("yaw"), "cmd": cmd.get("cmd"), "t": cmd.get("t")})
-                        for c in list(clients):
-                            if c is not sock:
-                                try: await c.send_str(relay)
-                                except Exception: pass
+                    elif cmd.get("op") == "body_sub":
+                        body_subs.add(sock) if cmd.get("value", True) else body_subs.discard(sock)
                         continue
                     elif cmd.get("op") == "readouts":
                         await sock.send_str(json.dumps({"op": "readouts", "sim_ms": engine.sim_ms,
@@ -249,7 +253,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                         try: await c.send_str(msg_state)
                         except Exception: pass
         finally:
-            clients.discard(sock)
+            clients.discard(sock); body_subs.discard(sock)
         return sock
 
     async def broadcaster(app):
