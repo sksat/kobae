@@ -32,8 +32,11 @@ class GpuBrain:
     """
 
     def __init__(self, graph, ring_cap: int = 1 << 21, adapter_index: int | None = None, verbose: bool = True,
-                 graded: np.ndarray | None = None, graded_fmax_hz: float = 200.0):
-        """``graded``: boolean mask of cells simulated as graded (non-spiking) units; None = all spiking."""
+                 graded: np.ndarray | None = None, graded_fmax_hz: float = 200.0, graded_every: int = 5):
+        """``graded``: boolean mask of cells simulated as graded (non-spiking) units; None = all spiking.
+        ``graded_every``: run the (expensive, 11 M-edge) graded gather every this many batches; the
+        transmitted charge is scaled by the same factor. 5 batches = 9 ms, well under tau_m = 20 ms."""
+        self.graded_every = max(1, int(graded_every))
         self.G = graph
         n, E = graph.n, graph.E
         self.n, self.E = n, E
@@ -92,8 +95,8 @@ class GpuBrain:
         self.b_gptr = d.create_buffer_with_data(data=gptr, usage=ro)
         self.b_gpre = d.create_buffer_with_data(data=gpre, usage=ro)
         self.b_gwq = d.create_buffer_with_data(data=gwq, usage=ro)
-        # one batch of continuous transmission at rate 1 == f_max spikes/s * batch seconds, in fixed-point units
-        graded_gain = float(self.graded_fmax * M.DELAY_STEPS * M.DT_MS / 1000.0)
+        # continuous transmission at rate 1 == f_max spikes/s, lumped once per `graded_every` batches
+        graded_gain = float(self.graded_fmax * M.DELAY_STEPS * M.DT_MS / 1000.0 * self.graded_every)
         params = struct.pack("<4I8f", n, M.DELAY_STEPS, ring_cap, 0,
                              M.AV, M.AG, M.COUPLING, M.V_REST, M.V_THRESH, float(M.REFRACTORY_STEPS),
                              1.0 / M.G_SCALE, graded_gain)
@@ -129,6 +132,7 @@ class GpuBrain:
         self._wall = 0.0
         self._ring_base = 0  # ring entries already consumed (host side)
         self.chunk = 8       # batches per submit, adapted from measured submit time
+        self._batch_no = 0
         self.reset_state()
 
     # ---- state -----------------------------------------------------------
@@ -166,11 +170,12 @@ class GpuBrain:
             cp.dispatch_workgroups(1, 1, 1)
             cp.set_pipeline(self.p_scatter)
             cp.dispatch_workgroups_indirect(self.b_indirect, 0)
-            if self.n_graded_edges:
+            if self.n_graded_edges and self._batch_no % self.graded_every == 0:
                 cp.set_pipeline(self.p_graded)
                 cp.dispatch_workgroups(self.wg_integrate, 1, 1)
             cp.set_pipeline(self.p_finish)
             cp.dispatch_workgroups(1, 1, 1)
+            self._batch_no += 1
         cp.end()
         self.device.queue.submit([enc.finish()])
         self.device.queue.read_buffer(self.b_meta, 0, 4)  # blocks until this submit has completed
