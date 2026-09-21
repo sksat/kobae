@@ -9,14 +9,24 @@ const meta = await (await fetch("/api/meta")).json();
 const pos = new Float32Array(await (await fetch("/api/positions")).arrayBuffer());
 const scIdx = new Uint8Array(await (await fetch("/api/superclass")).arrayBuffer());
 const N = meta.n;
-$("#backend").textContent = `${meta.backend} · ${N.toLocaleString()} cells · ${meta.edges.toLocaleString()} edges`;
+$("#backend").textContent = `計算: ${meta.backend.toUpperCase()} · ${N.toLocaleString()} 細胞 · ${meta.edges.toLocaleString()} 結合`;
+const SC_JA = { ENS: "腸管神経", ascending_neuron: "上行（体→脳）", cb_efferent: "中枢脳 遠心", cb_endocrine: "中枢脳 内分泌",
+  cb_intrinsic: "中枢脳 内在", cb_motor: "中枢脳 運動", cb_sensory: "中枢脳 感覚", cb_sensory_tbc: "中枢脳 感覚(未確定)",
+  descending_neuron: "下行（脳→体）", descending_neuron_tbc: "下行(未確定)", efferent_ascending: "遠心+上行", efferent_descending: "遠心+下行",
+  ol_intrinsic: "視葉 内在", ol_sensory: "視葉 感覚（光受容体）", sensory_ascending: "感覚+上行", sensory_ascending_tbc: "感覚+上行(未確定)",
+  sensory_descending: "感覚+下行", visual_centrifugal: "視覚 遠心", visual_projection: "視覚 投射", visual_projection_tbc: "視覚 投射(未確定)",
+  vnc_efferent: "腹髄 遠心", vnc_endocrine: "腹髄 内分泌", vnc_intrinsic: "腹髄 内在", vnc_motor: "腹髄 運動", vnc_sensory: "腹髄 感覚",
+  vnc_sensory_tbc: "腹髄 感覚(未確定)", vnc_tbc: "腹髄(未確定)" };
+const scJa = (s) => SC_JA[s] || s;
+const RO_JA = { DNa02: "旋回", DNp09: "前進", MDN: "後退", MN9: "吻を伸ばす（摂食）", DNp20: "視覚→下行 DNp20", DNpe017: "視覚→下行 DNpe017" };
+const BTN_JA = { FOOD: "食べ物（味覚）", BITTER: "苦味", PAIN: "痛み", PHEROMONE: "フェロモン（接触）", MATE: "求愛回路", DOPAMINE: "ドーパミン（報酬）", WIND: "風・音", GIANT: "逃避（巨大線維）" };
 
 // superclass palette (stable order = meta.superclasses)
 const PALETTE = ["#7cc7ff","#ffb86b","#8be28b","#ff7b9c","#c9a2ff","#ffe36b","#6be8d8","#ff9b6b","#a7c4ff","#e6a4ff",
   "#9be0a0","#ffd0a0","#8ad0ff","#ffa0c0","#c0ffa0","#a0a8ff","#ffc4e0","#b0ffe0","#e0e080","#c0c0c0",
   "#ff8080","#80ffc0","#c080ff","#80c0ff","#ffc080","#c0ff80","#ff80c0"];
 const scColor = meta.superclasses.map((_, i) => new THREE.Color(PALETTE[i % PALETTE.length]));
-$("#legend").innerHTML = "<b>色 = superclass</b> " + meta.superclasses.map((s, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${s} ${meta.superclass_counts[i].toLocaleString()}</span>`).join(" ");
+$("#legend").innerHTML = "<b>点の色 = 細胞のクラス</b><br>" + meta.superclasses.map((s, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${scJa(s)} ${meta.superclass_counts[i].toLocaleString()}</span>`).join(" ");
 
 // ---------------------------------------------------------------- scene
 const canvas = $("#gl");
@@ -138,9 +148,8 @@ document.querySelectorAll("[data-visual]").forEach(b => b.onclick = () => stim({
 let paused = false;
 $("#pause").onclick = () => { paused = !paused; send({ op: "pause", value: paused }); $("#pause").classList.toggle("on", paused); };
 $("#reset").onclick = () => { send({ op: "reset" }); lastSpike.fill(-1e9); lastAttr.needsUpdate = true; raster.length = 0; };
-$("#btnhelp").textContent = Object.entries(meta.buttons).map(([k, v]) => `${k}: ${v}`).join(" / ");
 for (const [name, desc] of Object.entries(meta.buttons)) {
-  const b = document.createElement("button"); b.textContent = name; b.title = desc; b.dataset.button = name;
+  const b = document.createElement("button"); b.textContent = BTN_JA[name] || name; b.title = desc; b.dataset.button = name;
   b.onclick = () => stim({ buttons: { ...state.buttons, [name]: !(state.buttons || {})[name] } });
   $("#buttons").appendChild(b);
 }
@@ -161,14 +170,19 @@ $("#clear").onclick = () => { stim({ custom: [] }); rasterSet = new Map(meta.rea
 // bars
 const scBars = meta.superclasses.map((s, i) => {
   const d = document.createElement("div"); d.className = "bar";
-  d.innerHTML = `<span title="${meta.superclass_counts[i]} cells" style="color:${PALETTE[i % PALETTE.length]}">${s}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
+  d.innerHTML = `<span title="${s}: ${meta.superclass_counts[i]} 細胞" style="color:${PALETTE[i % PALETTE.length]}">${scJa(s)}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
   $("#scbars").appendChild(d); return d;
 });
-const roBars = meta.readouts.map((r) => {
-  const d = document.createElement("div"); d.className = "bar";
-  d.innerHTML = `<span>${r.type} ${r.side}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
-  $("#readouts").appendChild(d); return d;
+const roOrder = meta.readouts.map((r, i) => i).sort((a, b) => {
+  const ka = Object.keys(RO_JA).indexOf(meta.readouts[a].type), kb = Object.keys(RO_JA).indexOf(meta.readouts[b].type);
+  return ka - kb || meta.readouts[a].side.localeCompare(meta.readouts[b].side);
 });
+const roBars = new Array(meta.readouts.length);
+for (const i of roOrder) {
+  const r = meta.readouts[i]; const d = document.createElement("div"); d.className = "bar";
+  d.innerHTML = `<span title="${r.type} bodyId ${r.id}">${RO_JA[r.type] || r.type} ${r.side === "L" ? "左" : r.side === "R" ? "右" : ""}</span><div class="track"><div class="fill"></div></div><span class="val"></span>`;
+  $("#readouts").appendChild(d); roBars[i] = d;
+}
 
 // retina map
 const rc = $("#retina").getContext("2d");
@@ -192,7 +206,7 @@ function drawRaster() {
     const t = raster[k]; if (t < t0) continue;
     rr.fillRect((t - t0) / win * 360, raster[k+1] / rows * 158, 1.5, Math.max(1, 158 / rows - 1));
   }
-  $("#rasterinfo").textContent = `${rasterLabel} (${rasterSet.size} cells, 2 s)`;
+  $("#rasterinfo").textContent = `${rasterLabel === "readouts" ? "行動の出力ニューロン" : rasterLabel}（${rasterSet.size} 細胞）`;
 }
 
 // click -> nearest projected point
@@ -210,7 +224,7 @@ canvas.addEventListener("pointerup", async (e) => {
   }
   if (best < 0) return;
   const c = await (await fetch(`/api/cell/${best}`)).json();
-  $("#cellinfo").innerHTML = `<b>${c.type || "(untyped)"}</b> ${c.side} · ${c.superclass}<br>bodyId ${c.bodyId} · nt ${c.nt || "?"} (${c.sign > 0 ? "+" : "−"})<br>out ${c.out_degree} · in ${c.in_degree} · ${c.rate_hz.toFixed(1)} Hz · soma ${c.measured_soma ? "measured" : "estimated"}`;
+  $("#cellinfo").innerHTML = `<b>${c.type || "(型なし)"}</b> ${c.side === "L" ? "左" : c.side === "R" ? "右" : ""} · ${scJa(c.superclass)}<br>bodyId ${c.bodyId} · 伝達物質 ${c.nt || "不明"}（${c.sign > 0 ? "興奮性 +" : "抑制性 −"}）<br>出力先 ${c.out_degree} 細胞 · 入力元 ${c.in_degree} 細胞 · いま ${c.rate_hz.toFixed(1)} Hz · 位置は${c.measured_soma ? "実測" : "推定"}`;
   rasterSet = new Map([[best, 0]]); rasterLabel = c.type || String(best); raster.length = 0;
 });
 
