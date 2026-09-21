@@ -1,13 +1,18 @@
 """flybody flight body driven by a command (speed, yaw rate, climb) with the trained flight policy.
 
 The trained policy (Vaxenburg et al. 2025, imitation flight) tracks a reference
-centre-of-mass trajectory using a wingbeat pattern generator. Here the reference
-trajectory is not a recorded fly but is generated on the fly from a *command*:
-forward speed, yaw rate and climb rate. Whoever sets the command steers the fly;
-in kobae that is the brain's descending-neuron read-out (see ``loop.py``).
+root trajectory using a wingbeat pattern generator. Here the reference is not a
+recorded fly: it is extended on the fly from a *command* (forward speed, yaw
+rate, climb rate). Whoever sets the command steers the fly; in kobae that is the
+brain's descending-neuron read-out (``loop.py``).
 
 Runs without TensorFlow: the policy MLP is loaded from the .npz made by
 ``extract_policy.py`` and evaluated in numpy.
+
+Performance notes: flybody's task resets recompile the MJCF (0.4 s each) and its
+``before_step`` re-resolves mjcf bindings every step (6 ms). We run ONE episode
+of unbounded length, extend the reference arrays in place ahead of the task's
+step counter, and patch ``before_step`` to use cached bindings.
 """
 from __future__ import annotations
 
@@ -16,11 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from dm_control import mjcf
 from dm_control import mujoco as dm_mujoco
 
 from flybody.fly_envs import flight_imitation
 from flybody.quaternions import mult_quat
-from flybody.tasks.task_utils import real2canonical  # noqa: F401  (kept for reference)
 
 CONTROL_DT = 2e-4  # flybody flight control timestep, s (matches _FLY_CONTROL_TIMESTEP)
 
@@ -65,77 +70,113 @@ class Command:
 
 
 class FlightBody:
-    """A flying fly whose reference trajectory is regenerated from ``command`` every ``horizon`` steps."""
+    """A flying fly whose reference trajectory is extended from ``command`` as time advances."""
 
     def __init__(self, policy_path: str | Path, wpg_pattern_path: str | None = None,
-                 horizon_steps: int = 50, future_steps: int = 5, seed: int = 0):
+                 horizon_steps: int = 50, future_steps: int = 5, seed: int = 0, buffer_s: float = 30.0):
         self.env = flight_imitation(None, wpg_pattern_path, future_steps=future_steps,
                                     terminal_com_dist=float("inf"),
                                     random_state=np.random.RandomState(seed))
-        self.env.task._time_limit = float("inf")
+        self.env._time_limit = float("inf")
         self.policy = NumpyPolicy(policy_path)
         self.spec = self.env.action_spec()
         self.horizon = horizon_steps
         self.future = future_steps
         self.command = Command()
-        self.pos = np.array([0.0, 0.0, 1.0]); self.quat = np.array([1.0, 0, 0, 0])
-        self._new_segment(reset=True)
-        self.timestep = self.env.reset()
         self.t = 0
         self.wall = 0.0
+        self.timestep = self.env.reset()          # the only reset: compiles the model
+        task = self.env.task
+        task._traj_timesteps = 1 << 30            # never "reach the end" of the reference
+        # long reference buffers (root frame), seeded with the row the reset used
+        n = int(buffer_s / CONTROL_DT)
+        self.ref_qpos = np.zeros((n, 7)); self.ref_qvel = np.zeros((n, 6))
+        self.ref_qpos[0] = task._ref_qpos[0]; self.ref_qvel[0] = task._ref_qvel[0]
+        self.filled = 1
+        task._ref_qpos = self.ref_qpos; task._ref_qvel = self.ref_qvel
+        self._patch_before_step()
+        self._extend(self.horizon + self.future + 2)
 
-    # reference trajectory segment from the current pose and command
-    def _segment(self, n: int):
+    # ---- reference trajectory -------------------------------------------------
+    def _extend(self, n: int):
+        """Append n rows continuing from the last row with the current command."""
         c = self.command
-        qpos = np.zeros((n, 7)); qvel = np.zeros((n, 6))
-        qpos[0, :3] = self.pos; qpos[0, 3:] = self.quat
-        yaw0 = 2 * np.arctan2(self.quat[3], self.quat[0])
+        if self.filled + n > len(self.ref_qpos):   # grow the buffer
+            grow = len(self.ref_qpos)
+            self.ref_qpos = np.concatenate([self.ref_qpos, np.zeros((grow, 7))])
+            self.ref_qvel = np.concatenate([self.ref_qvel, np.zeros((grow, 6))])
+            self.env.task._ref_qpos = self.ref_qpos; self.env.task._ref_qvel = self.ref_qvel
+        q0 = self.ref_qpos[self.filled - 1]
+        yaw0 = 2 * np.arctan2(q0[6], q0[3])
         dth = c.yaw * CONTROL_DT
         dq = np.array([np.cos(dth / 2), 0, 0, np.sin(dth / 2)])
         w = np.zeros(3); dm_mujoco.mju_quat2Vel(w, dq, 1)
+        pos = q0[:3].copy(); quat = q0[3:].copy()
         for i in range(n):
-            yaw = yaw0 + c.yaw * i * CONTROL_DT
-            qvel[i, :3] = [c.speed * np.cos(yaw), c.speed * np.sin(yaw), c.climb]
-            qvel[i, 3:] = w
-            if i:
-                qpos[i, :3] = qpos[i - 1, :3] + qvel[i, :3] * CONTROL_DT
-                qpos[i, 3:] = mult_quat(dq, qpos[i - 1, 3:])
-        return qpos, qvel
+            yaw = yaw0 + c.yaw * (i + 1) * CONTROL_DT
+            vel = np.array([c.speed * np.cos(yaw), c.speed * np.sin(yaw), c.climb])
+            pos = pos + vel * CONTROL_DT
+            quat = mult_quat(dq, quat)
+            k = self.filled + i
+            self.ref_qpos[k, :3] = pos; self.ref_qpos[k, 3:] = quat
+            self.ref_qvel[k, :3] = vel; self.ref_qvel[k, 3:] = w
+        self.filled += n
 
-    def _new_segment(self, reset=False):
-        n = self.horizon + self.future + 2
-        qpos, qvel = self._segment(n)
-        self.env.task._traj_generator.set_next_trajectory(qpos, qvel)
-        self._seg_step = 0
+    def _patch_before_step(self):
+        """Same semantics as FlightImitationWBPG.before_step, with bindings resolved once."""
+        task = self.env.task
+        physics = self.env.physics
+        # resolve indices once; then read/write the raw mujoco arrays directly
+        wing_qpos_idx = np.asarray(physics.bind(task._wing_joints).qposadr)
+        gj = physics.bind(mjcf.get_frame_freejoint(task._ghost.mjcf_model))
+        gq, gv = int(gj.qposadr), int(gj.dofadr)
+        offset = np.hstack((task._ghost_offset, 4 * [0]))
+        wbpg = task._wbpg
+        parent_before = type(task).__mro__[1].before_step  # Flying.before_step
+        data = physics.data
 
+        def before_step(physics, action, random_state):
+            base_freq, rel_range = wbpg.base_beat_freq, wbpg.rel_freq_range
+            act = action[task._user_idx_action]
+            ctrl = wbpg.step(ctrl_freq=base_freq * (1 + rel_range * act))
+            action[task._wing_inds_action] += (ctrl - data.qpos[wing_qpos_idx])
+            step = int(np.round(data.time / task.control_timestep))
+            g = task._ref_qpos[step] + offset
+            data.qpos[gq:gq + 3] = g[:3]; data.qpos[gq + 3:gq + 7] = g[3:] / np.linalg.norm(g[3:])
+            data.qvel[gv:gv + 6] = task._ref_qvel[step]
+            parent_before(task, physics, action, random_state)
+
+        task.before_step = before_step
+
+    # ---- stepping ---------------------------------------------------------------
     def step(self, n: int = 1):
         """Advance n control steps (0.2 ms each). Returns the last timestep."""
         t0 = time.perf_counter()
         for _ in range(n):
-            if self._seg_step >= self.horizon:
-                # continue the reference from where the *reference* currently is (not the body),
-                # so the target stays smooth; the body keeps tracking it
-                task = self.env.task
-                k = min(self._seg_step, len(task._ref_qpos) - 1)
-                self.pos = task._ref_qpos[k, :3].copy(); self.quat = task._ref_qpos[k, 3:].copy()
-                self._new_segment()
-                self.timestep = self.env.reset()
+            need = self.env.task._step_counter + self.future + 2 + self.horizon
+            if self.filled < need:
+                self._extend(self.horizon)
             obs = flatten_obs(self.timestep.observation)
             a = self.policy(obs)
             self.timestep = self.env.step(canonical_to_real(a, self.spec))
-            self._seg_step += 1; self.t += 1
+            if self.timestep.last():   # fell below the terminal height etc.: relaunch from the reference
+                self.timestep = self.env.reset()
+            self.t += 1
         self.wall += time.perf_counter() - t0
         return self.timestep
 
-    # ---- readouts for the coupling
+    # ---- readouts for the coupling ----------------------------------------------
     @property
     def physics(self):
         return self.env.physics
 
     def body_pose(self):
-        w = self.env.task._walker
-        p = self.physics.bind(w.root_body)
-        return p.xpos.copy(), p.xquat.copy()
+        p, q = self.env.task._walker.get_pose(self.physics)
+        return np.asarray(p).copy(), np.asarray(q).copy()
+
+    def ref_pose(self):
+        k = min(self.env.task._step_counter, self.filled - 1)
+        return self.ref_qpos[k, :3].copy(), self.ref_qpos[k, 3:].copy()
 
     def render(self, camera_id=1, width=320, height=240):
         return self.physics.render(camera_id=camera_id, width=width, height=height)

@@ -192,7 +192,7 @@ wheels = [
 
 [[package]]
 name = "dm-control"
-version = "1.0.41"
+version = "1.0.46"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
@@ -211,9 +211,9 @@ dependencies = [
     { name = "setuptools" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/96/49/10beb2d63b05e385bbb67995b6621385c4c80719ad1c71acfc55537b97de/dm_control-1.0.41.tar.gz", hash = "sha256:644113b7bbba5884da57e15adbb28961de775d04e2db8b1bf0304c06835eff16", size = 56275358, upload-time = "2026-05-11T16:27:17.895Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/30/f8613e2345bda75eabd37549dbb3b58ac0d7ee2027468d5b95a70792d760/dm_control-1.0.46.tar.gz", hash = "sha256:0bc1aa81f7a118c178f19c040d3a8ce8f48ab848ebf7ec69e738861abff2a8dd", size = 56281558, upload-time = "2026-09-09T18:00:29.886Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/2d/b4b082bdd27a4bfd689a4c4109b3fab828ac56db60b024f07710e496fa65/dm_control-1.0.41-py3-none-any.whl", hash = "sha256:81e89b295aeeca2ba71e8dd1baf26084f9d974f8b80a4a4c284da7b883847161", size = 56446431, upload-time = "2026-05-11T16:27:12.6Z" },
+    { url = "https://files.pythonhosted.org/packages/43/14/f678a816447389b70f4d95d18fa5972dd18984c6f1902e6a9f93fc0db914/dm_control-1.0.46-py3-none-any.whl", hash = "sha256:be98ff8a88f26796caa0eb4ac11af4f19076c34fd9ab101b38f9d4bd4016c09a", size = 56452220, upload-time = "2026-09-09T18:00:25.459Z" },
 ]
 
 [[package]]
@@ -284,7 +284,7 @@ wheels = [
 [[package]]
 name = "flybody"
 version = "0.1.0"
-source = { git = "https://github.com/TuragaLab/flybody.git#d015e9bfe441bd90ae431bac24c55cb74bdbce26" }
+source = { directory = "/home/sksat/prog/kobae/body/vendor/flybody-main" }
 dependencies = [
     { name = "dm-control" },
     { name = "h5py" },
@@ -292,6 +292,28 @@ dependencies = [
     { name = "numpy" },
     { name = "pytest" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "dm-acme", extras = ["tf", "envs", "jax"], marker = "extra == 'tf'" },
+    { name = "dm-control" },
+    { name = "dm-reverb", marker = "extra == 'tf'", specifier = "==0.7.0" },
+    { name = "flybody", extras = ["ray", "dev"], marker = "extra == 'all'" },
+    { name = "flybody", extras = ["tf"], marker = "extra == 'ray'" },
+    { name = "h5py" },
+    { name = "jupyterlab", marker = "extra == 'dev'" },
+    { name = "mediapy" },
+    { name = "numpy", specifier = "==1.26.4" },
+    { name = "nvidia-cudnn-cu11", marker = "extra == 'tf'", specifier = "==8.9.*" },
+    { name = "protobuf", marker = "extra == 'tf'", specifier = "==3.20.*" },
+    { name = "pytest" },
+    { name = "ray", extras = ["default"], marker = "extra == 'ray'" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "tensorflow", marker = "extra == 'tf'", specifier = "==2.8.0" },
+    { name = "tensorflow-probability", marker = "extra == 'tf'", specifier = "==0.16.0" },
+    { name = "tqdm", marker = "extra == 'dev'" },
+]
+provides-extras = ["tf", "ray", "dev", "all"]
 
 [[package]]
 name = "fonttools"
@@ -545,10 +567,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp" },
-    { name = "dm-control" },
-    { name = "flybody", git = "https://github.com/TuragaLab/flybody.git" },
+    { name = "dm-control", specifier = ">=1.0.46" },
+    { name = "flybody", directory = "/home/sksat/prog/kobae/body/vendor/flybody-main" },
     { name = "mediapy" },
-    { name = "mujoco", specifier = ">=3.9,<3.10" },
+    { name = "mujoco", specifier = ">=3.13" },
     { name = "numpy" },
     { name = "pillow" },
     { name = "tensorflow-cpu" },
@@ -708,7 +730,7 @@ wheels = [
 
 [[package]]
 name = "mujoco"
-version = "3.9.0"
+version = "3.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
@@ -717,13 +739,12 @@ dependencies = [
     { name = "numpy" },
     { name = "pyopengl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bc/f6/325fa0c1a1d63b1bb6852e265fb8d7fd8a88ddcd3580dc153e1dceb197dd/mujoco-3.9.0.tar.gz", hash = "sha256:0a1ca878c4a80893251420037a0583252d1356a0cc8d661268627c674c7835f7", size = 923500, upload-time = "2026-05-27T14:49:48.52Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/f6/0c581b100dfc71bc999844685e3d33cfe972f7fed24b62c47b346be7a0fa/mujoco-3.13.0.tar.gz", hash = "sha256:539175d5db25d19ec145170fa264784a626c5ecb227f78d1877e35a0a7955f69", size = 1213045, upload-time = "2026-09-09T15:39:54.985Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/9b/86bc30e294f835a04ed261a3271d6f192595fd70e5f9f0bbe7f31a357ddd/mujoco-3.9.0-cp312-cp312-macosx_10_16_x86_64.whl", hash = "sha256:f1d8736589ad736f8ec1601a701a8ab84aff5a2b29244fe58194d8f0a0984865", size = 7467226, upload-time = "2026-05-27T14:49:18.948Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/14/5c8d8d660e23bcd6963f3f7df525504cd082000efc2bbc76812b9b7a4af5/mujoco-3.9.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:2f38a5d011425585d10a1b4dd9ff941072ffccda2db071b462c86967199a3bb0", size = 7461002, upload-time = "2026-05-27T14:49:21.028Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/7e/eb1840f486d322cd5285a2dc2e422cbc22f4e273b66edc0cf9d96cbad47c/mujoco-3.9.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8af0cb8c96f5b02e701f9ab7a9c905d1c655626b3226a4c4da7b28bf2771a4e7", size = 6847433, upload-time = "2026-05-27T14:49:22.974Z" },
-    { url = "https://files.pythonhosted.org/packages/d5/01/b2a88b6b73df933d5ab38583240c296684b626a8de3c3bb9a7c2fd356f08/mujoco-3.9.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f8c6769ac1463752ff392d8c4d20014e54220112d772e6ccecdf6bcdb6d43e07", size = 7392160, upload-time = "2026-05-27T14:49:25.543Z" },
-    { url = "https://files.pythonhosted.org/packages/66/22/7ce98722ecfb38aa2e3ca9da7bbe2b662ef95ec13acad1c8a63f22e14f39/mujoco-3.9.0-cp312-cp312-win_amd64.whl", hash = "sha256:812406661161ebff1335e5293a6fb2ae4b193a9ea03e3f6579875aef345a3c8f", size = 5974891, upload-time = "2026-05-27T14:49:27.147Z" },
+    { url = "https://files.pythonhosted.org/packages/af/6e/b41a3a86a57724ae23827575d8eb30bc9f785f9d543616dfa159eda87dfe/mujoco-3.13.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:521329d8fc0d7f3d40cdafeb738b95ffeddec00f280e5482a68c284257be942f", size = 18822490, upload-time = "2026-09-09T15:38:44.325Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/82/6e62cc389e67a3527c0feb1dbc56dcd0c6ee6e2d42396da89f1712bccd32/mujoco-3.13.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ce292cdf888dcadf1d1440c3debfdd38519ea01d8e4376f86d1e7754bfe0b069", size = 19103843, upload-time = "2026-09-09T15:38:47.157Z" },
+    { url = "https://files.pythonhosted.org/packages/32/14/585fc852dadf2d73250b45e9d5845624270ca526b723bc2a1c24e1305006/mujoco-3.13.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c4ad24d902887dd9ec1ec5c7149a2d3cf62fb3f6e652a82d113e1ec3d6308ed5", size = 20378803, upload-time = "2026-09-09T15:38:49.848Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/81/f436a5534438936ed62a5d4a74e3fcd41d934858cc27ee0fef822b30621b/mujoco-3.13.0-cp312-cp312-win_amd64.whl", hash = "sha256:85ec06a120bb0cdb19b3815f9e55101fb210e2683b182dc69b169f95ba9a98c4", size = 17231642, upload-time = "2026-09-09T15:38:52.466Z" },
 ]
 
 [[package]]

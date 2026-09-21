@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "flybody (MuJoCo) fly body + flight policy coupled to the kobae brain server"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "mujoco>=3.9,<3.10",
-  "dm_control",
+  "mujoco>=3.13",
+  "dm_control>=1.0.46",
   "numpy",
-  "flybody @ git+https://github.com/TuragaLab/flybody.git",
+  "flybody @ file:///home/sksat/prog/kobae/body/vendor/flybody-main",
   "tensorflow-cpu",
   "websockets",
   "pillow",
