@@ -257,25 +257,38 @@ canvas.addEventListener("pointerup", async (e) => {
 
 // body (flybody) relay
 const path = [];
+let mode = "brain", bodySeen = false;
+function setMode(m) {
+  mode = m;
+  $("#flight").hidden = m !== "flight"; $("#gl").style.visibility = m === "flight" ? "hidden" : "visible";
+  document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+}
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+function drawPath(canvas, m, W, H) {
+  const c = canvas.getContext("2d"); c.fillStyle = "rgba(0,0,0,0.6)"; c.clearRect(0, 0, W, H); c.fillRect(0, 0, W, H);
+  if (path.length < 4) return;
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  for (let i = 0; i < path.length; i += 2) { minx = Math.min(minx, path[i]); maxx = Math.max(maxx, path[i]); miny = Math.min(miny, path[i+1]); maxy = Math.max(maxy, path[i+1]); }
+  const span = Math.max(maxx - minx, maxy - miny, 2), sx = (Math.min(W, H) - 20) / span, ox = (minx + maxx) / 2, oy = (miny + maxy) / 2;
+  c.strokeStyle = "#7cc7ff"; c.beginPath();
+  for (let i = 0; i < path.length; i += 2) { const x = W / 2 + (path[i] - ox) * sx, y = H / 2 - (path[i+1] - oy) * sx; i ? c.lineTo(x, y) : c.moveTo(x, y); }
+  c.stroke();
+  const x = W / 2 + (m.pos[0] - ox) * sx, y = H / 2 - (m.pos[1] - oy) * sx;
+  c.fillStyle = "#ffe36b"; c.beginPath(); c.arc(x, y, 4, 0, 6.283); c.fill();
+  if (m.yaw !== undefined) { c.strokeStyle = "#ffe36b"; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 12 * Math.cos(m.yaw), y - 12 * Math.sin(m.yaw)); c.stroke(); }
+  c.fillStyle = "#cfd6e2"; c.font = "10px ui-monospace"; c.fillText(`飛行経路 ${span.toFixed(0)} cm`, 6, H - 6);
+}
 function onBody(m) {
   const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
-  if (m.jpeg) $("#bodycam").src = "data:image/jpeg;base64," + m.jpeg;
-  if (m.eyes) $("#bodyeyes").src = "data:image/jpeg;base64," + m.eyes;
+  if (!bodySeen) { bodySeen = true; setMode("flight"); }
+  if (m.jpeg) { const src = "data:image/jpeg;base64," + m.jpeg; $("#bodycam").src = src; $("#chase").src = src; }
+  if (m.eyes) { const src = "data:image/jpeg;base64," + m.eyes; $("#bodyeyes").src = src; $("#eyesbig").src = src; }
   if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
-  const c = $("#bodypath").getContext("2d"); c.fillStyle = "#000"; c.fillRect(0, 0, 360, 200);
-  if (path.length >= 4) {
-    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
-    for (let i = 0; i < path.length; i += 2) { minx = Math.min(minx, path[i]); maxx = Math.max(maxx, path[i]); miny = Math.min(miny, path[i+1]); maxy = Math.max(maxy, path[i+1]); }
-    const span = Math.max(maxx - minx, maxy - miny, 2), sx = 340 / span, ox = (minx + maxx) / 2, oy = (miny + maxy) / 2;
-    c.strokeStyle = "#7cc7ff"; c.beginPath();
-    for (let i = 0; i < path.length; i += 2) { const x = 180 + (path[i] - ox) * sx, y = 100 - (path[i+1] - oy) * sx; i ? c.lineTo(x, y) : c.moveTo(x, y); }
-    c.stroke();
-    const x = 180 + (m.pos[0] - ox) * sx, y = 100 - (m.pos[1] - oy) * sx;
-    c.fillStyle = "#ffe36b"; c.beginPath(); c.arc(x, y, 4, 0, 6.283); c.fill();
-    if (m.yaw !== undefined) { c.strokeStyle = "#ffe36b"; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 12 * Math.cos(m.yaw), y - 12 * Math.sin(m.yaw)); c.stroke(); }
-    c.fillStyle = "#8a93a3"; c.font = "10px ui-monospace"; c.fillText(`${span.toFixed(0)} cm`, 6, 194);
+  drawPath($("#bodypath"), m, 360, 200); drawPath($("#minimap"), m, 220, 160);
+  if (m.cmd) {
+    const txt = `体の時間 ${(m.t ?? 0).toFixed(2)} s · 前進 ${m.cmd[0].toFixed(1)} cm/s · 旋回 ${m.cmd[1].toFixed(2)} rad/s · 高さ ${(m.pos?.[2] ?? 0).toFixed(1)} cm`;
+    $("#bodyinfo").textContent = txt; $("#flightinfo").textContent = txt;
   }
-  if (m.cmd) $("#bodyinfo").textContent = `体の時間 ${(m.t ?? 0).toFixed(2)} s · 指令: 前進 ${m.cmd[0].toFixed(1)} cm/s, 旋回 ${m.cmd[1].toFixed(2)} rad/s`;
 }
 
 // ---------------------------------------------------------------- loop

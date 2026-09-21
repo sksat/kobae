@@ -114,7 +114,7 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
             p, q = body.body_pose()
             it = int(round(sim_body * 100))
             if it % 5 == 0:   # 20 Hz relay to the viewer: chase camera + both eyes
-                chase = body.render(camera_id=camera, width=320, height=240)
+                chase = body.render(camera_id=camera, width=640, height=480)
                 eyes = np.concatenate([left, right], axis=1)
                 buf = io.BytesIO(); Image.fromarray(chase).save(buf, format="JPEG", quality=70)
                 ebuf = io.BytesIO(); Image.fromarray(eyes).save(ebuf, format="JPEG", quality=70)

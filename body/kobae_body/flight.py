@@ -31,22 +31,41 @@ CONTROL_DT = 2e-4  # flybody flight control timestep, s (matches _FLY_CONTROL_TI
 EYE_CAMERAS = ("walker/eye_left", "walker/eye_right")
 
 
-def add_scenery(arena_mjcf, seed: int = 0, n_pillars: int = 40, radius: float = 150.0):
-    """Dark pillars and a bright far wall so the fly's eyes see structure (flybody's arena is a bare floor)."""
+def add_scenery(arena_mjcf, seed: int = 0, n_pillars: int = 60, radius: float = 120.0, floor: float = 400.0):
+    """Make the world worth looking at: a large lit floor (flybody's arena floor is 8x8 cm, the fly
+    leaves it in half a second), a sky, coloured pillars and a few big landmarks."""
     rng = np.random.default_rng(seed)
-    wb = arena_mjcf.worldbody
+    root = arena_mjcf
+    # floor: enlarge and brighten the existing checker plane
+    g = root.find("geom", "groundplane")
+    g.size = [floor, floor, 0.5]
+    mat = root.find("material", "groundplane")
+    mat.texuniform = False
+    mat.texrepeat = [floor / 4, floor / 4]      # one repeat (2 squares) per 8 cm -> 4 cm squares
+    mat.reflectance = 0.0
+    tex = root.find("texture", "groundplane")
+    tex.rgb1 = [0.42, 0.5, 0.42]; tex.rgb2 = [0.22, 0.3, 0.26]
+    # sky and light
+    root.asset.add("texture", name="sky", type="skybox", builtin="gradient",
+                   rgb1=[0.62, 0.78, 0.95], rgb2=[0.25, 0.4, 0.7], width=256, height=256)
+    root.visual.headlight.ambient = [0.25, 0.25, 0.25]
+    root.visual.headlight.diffuse = [0.35, 0.35, 0.35]
+    root.visual.headlight.specular = [0.05, 0.05, 0.05]
+    root.visual.map.zfar = 4000
+    wb = root.worldbody
+    wb.add("light", name="sun", directional=True, pos=[0, 0, 200], dir=[0.3, 0.2, -1], diffuse=[0.5, 0.5, 0.45],
+           specular=[0.05, 0.05, 0.05], castshadow=True)
+    palette = [[0.85, 0.3, 0.25], [0.95, 0.75, 0.2], [0.3, 0.6, 0.9], [0.4, 0.75, 0.4], [0.8, 0.5, 0.8], [0.95, 0.95, 0.95]]
     for k in range(n_pillars):
-        r = rng.uniform(15, radius); a = rng.uniform(0, 2 * np.pi)
-        h = rng.uniform(4, 14)
-        wb.add("geom", name=f"pillar{k}", type="cylinder", size=[rng.uniform(0.6, 2.0), h],
-               pos=[r * np.cos(a), r * np.sin(a), h], rgba=[0.05, 0.05, 0.08, 1], contype=0, conaffinity=0)
-    # a checker "horizon" wall far away for optic flow
-    for k in range(24):
-        a = 2 * np.pi * k / 24
-        c = 0.9 if k % 2 == 0 else 0.15
-        wb.add("geom", name=f"wall{k}", type="box", size=[radius * 0.13, 0.5, 30],
-               pos=[radius * np.cos(a), radius * np.sin(a), 30], euler=[0, 0, np.degrees(a) + 90],
-               rgba=[c, c, c, 1], contype=0, conaffinity=0)
+        r = rng.uniform(8, radius); a = rng.uniform(0, 2 * np.pi)
+        h = rng.uniform(3, 12); c = palette[k % len(palette)]
+        wb.add("geom", name=f"pillar{k}", type="cylinder", size=[rng.uniform(0.4, 1.2), h],
+               pos=[r * np.cos(a), r * np.sin(a), h], rgba=c + [1], contype=0, conaffinity=0)
+    # a few big landmarks on the horizon
+    for k, c in enumerate(palette):
+        a = 2 * np.pi * k / len(palette)
+        wb.add("geom", name=f"landmark{k}", type="box", size=[6, 6, 25],
+               pos=[radius * 1.6 * np.cos(a), radius * 1.6 * np.sin(a), 25], rgba=c + [1], contype=0, conaffinity=0)
 
 
 class NumpyPolicy:

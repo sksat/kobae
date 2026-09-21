@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kobae — MaleCNS v1.0 live</title>
-  <script type="module" crossorigin src="/assets/index-DO9IQcuU.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-o5z_JSDd.css">
+  <script type="module" crossorigin src="/assets/index-DkQYORlV.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-mqnDRp0b.css">
 </head>
 <body>
 <div id="app">
   <div id="hud">
-    <div id="title">kobae <span id="backend"></span></div><div class="btns" id="views"><button data-view="front">正面から</button><button data-view="top">上から</button><button data-view="side">横から</button></div>
+    <div id="title">kobae <span id="backend"></span></div><div class="btns" id="views"><button data-view="front">正面から</button><button data-view="top">上から</button><button data-view="side">横から</button></div><div class="btns" id="modes"><button data-mode="brain" class="on">脳</button><button data-mode="flight">飛行</button></div>
     <div id="meters">
       <span>脳内時間 <b id="simt">0.00</b> 秒</span>
       <span>速度 <b id="rt">–</b> 倍速（実時間比）</span>
@@ -49,7 +49,15 @@
       <div id="globinfo" class="dim"></div>
     </section>
   </div>
-  <canvas id="gl"></canvas>
+  <div id="stage">
+    <canvas id="gl"></canvas>
+    <div id="flight" hidden>
+      <img id="chase" alt="chase camera">
+      <div id="flighthud"><span id="flightinfo"></span></div>
+      <img id="eyesbig" alt="eyes">
+      <canvas id="minimap" width="220" height="160"></canvas>
+    </div>
+  </div>
   <div id="right">
     <section>
       <h3>領域ごとの活動</h3><div class="dim">細胞のクラスごとの平均発火率（1 細胞あたり Hz、直近 100 ms）。</div>
