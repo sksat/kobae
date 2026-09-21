@@ -1,13 +1,13 @@
 # kobae 設計メモ
 
-MaleCNS v1.0（オスショウジョウバエ中枢神経系の全結合図）を、**全ニューロン 166,700・全有向結合 25,582,938** のまま
-LIF スパイキングモデルとして Vulkan (wgpu-py / WGSL) 上で回し、ブラウザで対話的に観察するためのシミュレータ。
+[MaleCNS][malecns] v1.0（オスショウジョウバエ中枢神経系の全結合図）を、**全ニューロン 166,700・全有向結合 25,582,938** のまま
+LIF スパイキングモデルとして Vulkan ([wgpu-py][wgpu] / WGSL) 上で回し、ブラウザで対話的に観察するためのシミュレータ。
 DOOM や外部ゲームは接続しない。
 
 ## 決定事項（ユーザーと議論して確定）
 
 ### 1. ニューロンモデル
-- **段階 1: Shiu et al. 2024 / DoomFly 型 LIF を全細胞に適用**（検証可能性の土台）
+- **段階 1: [Shiu et al. 2024][shiu2024] / [DoomFly][doomfly] 型 LIF を全細胞に適用**（検証可能性の土台）
   - dt 0.1 ms、静止電位 −52 mV、閾値 −45 mV、リセット −52 mV
   - τm 20 ms、τg 5 ms（指数シナプス）、g の結合係数 (av − ag)/3
   - シナプス遅延 1.8 ms（18 step）、不応期 2.2 ms（22 step）
@@ -18,13 +18,13 @@ DOOM や外部ゲームは接続しない。
   - 段階 1 の検証を通してから、細胞集合の指定だけで切り替えられる構造にする（カーネル構造は共通）
 
 ### 2. ニューロン集合・重み
-- ノード: superclass が付いていて status ≠ Glia の全行（DoomFly と同じ、166,700）。bodyId 昇順 = ノード index
+- ノード: superclass が付いていて status ≠ Glia の全行（[DoomFly][doomfly] と同じ、166,700）。bodyId 昇順 = ノード index
 - エッジ: 両端が retained な全リリース済みエッジ。シナプス数の閾値なし、自己結合も保持
 - 伝達物質符号: ACh → +1、GABA / glutamate / histamine → −1
 - **曖昧な 3,718 細胞（共放出・予測不能・修飾物質のみ）は設定で切り替え、既定 +1**（DoomFly / Shiu 流。検算 1:1 のため）
 
 ### 3. 検証基準
-- 同じグラフ・同じ刺激で CPU 参照（DoomFly `doom/engine.py` の numba `advance` の忠実移植）と比較
+- 同じグラフ・同じ刺激で CPU 参照（[DoomFly][doomfly] `doom/engine.py` の numba `advance` の忠実移植）と比較
 - **初期 20 ms は発火集合（細胞 × step）が完全一致**
 - **500 ms では統計一致**: 総発火数 ±2 %、細胞ごとの発火数の相関 > 0.99、発火した細胞集合の Jaccard > 0.95
 - GPU 側は int32 固定小数点の整数加算で決定論的（実行ごとにビット一致）。CPU 参照は f32 逐次加算なので長期では発散する前提
@@ -41,18 +41,18 @@ DOOM や外部ゲームは接続しない。
 - 基本: 糖 on/off、電流スライダ、一時停止
 - 視覚: フラッシュ / 左のみ / 右のみ / 動くバー（R1-R6 の uv マップに描画 → 輝度 → 電流、ラミナ恒常電流つき）
 - 嗅覚: ORN を糸球体（受容体型）別に on/off
-- 痛み・求愛など FLYBOARD 風のボタン（侵害受容、fru/dsx 陽性細胞、ドーパミン細胞）
+- 痛み・求愛など [FLYBOARD][flyboard] 風のボタン（侵害受容、fru/dsx 陽性細胞、ドーパミン細胞）
 - 自由な集合指定（cell_type を文字列検索 → 電流注入）
 
 ### 6. 体
-- **MuJoCo 物理（flygym / NeuroMechFly 系）で「ちゃんと挙動を再現」し、仮想空間を飛べるようにしたい**
-- 既存資産の流用を優先する。飛行ができる唯一の既存資産は **flybody**（Google DeepMind / Janelia、Apache-2.0、MuJoCo + 空力 + 学習済み飛行/歩行ポリシー、figshare 配布）
+- **[MuJoCo][mujoco] 物理（flygym / [NeuroMechFly][neuromechfly] 系）で「ちゃんと挙動を再現」し、仮想空間を飛べるようにしたい**
+- 既存資産の流用を優先する。飛行ができる唯一の既存資産は **[flybody][flybody]**（Google DeepMind / Janelia、Apache-2.0、MuJoCo + 空力 + 学習済み飛行/歩行ポリシー、figshare 配布）
 - 結合案（未確定）: 下行ニューロンの発火レート → 操舵指令 → flybody 飛行ポリシー / 視覚: MuJoCo カメラ → 網膜 uv マップ → R1-R6
 - 運動ニューロン → 関節トルク直結は研究課題（対応表を自作する必要、飛べる保証なし）として将来オプション
 
 ### 7. 進め方（2026-09-21 決定）
 - **既存実装を先に一通り動かしてから、新規実装 (kobae) か fork かを判断する**
-- 対象: gfly（ブラウザ）、webgpu-fly（ブラウザ WebGPU、flybody 体つき）、FLYBOARD（CPU）、flyverse-core（CPU）、Fly.exe preview（体のみ）、DoomFly 参照カーネル（BC-250 CPU、実時間比）
+- 対象: [gfly][gfly]（ブラウザ）、[webgpu-fly][webgpufly]（ブラウザ WebGPU、[flybody][flybody] 体つき）、[FLYBOARD][flyboard]（CPU）、[flyverse-core][flyverse]（CPU）、[Fly.exe][flyexe] preview（体のみ）、[DoomFly][doomfly] 参照カーネル（BC-250 CPU、実時間比）
 - 評価軸: 動くか / 見た目 / 速度（実時間比）/ コードの流用可能性（神経コア・感覚系・体・ビューア）
 - 既存実装の評価用チェックアウトは `eval/` 配下（git 管理外）
 
@@ -90,17 +90,17 @@ DOOM や外部ゲームは接続しない。
 
 ### ソフトウェア構成
 - Python 3.14、uv 管理、パッケージ名 `kobae`
-- `graph.py`: feather → CSR (`npz`)。DoomFly のノード/エッジ方針・網膜投影 (R1-R6 → L1/L2/L3 の最頻 hex 列 → uv) を移植 (MIT)
+- `graph.py`: feather → CSR (`npz`)。[DoomFly][doomfly] のノード/エッジ方針・網膜投影 (R1-R6 → L1/L2/L3 の最頻 hex 列 → uv) を移植 (MIT)
 - `cpu.py`: numba 参照カーネル
 - `gpu.py` + `shaders/lif.wgsl`: 本体
 - `server.py` + `viewer/`: aiohttp + WebSocket、three.js 点群（annotations の `somaLocation` 列）
 - ターゲット: 開発機 RX 580 (Polaris, 256 GB/s, RADV) で開発、BC-250 (gfx1013, 382 GB/s, 16 GB 共有) で本計測
 
 ### ベンチマーク条件
-- 疎: 糖受容ニューロン LB3c に 30 mV 定常電流（Eon Systems の表と同系統）
+- 疎: 糖受容ニューロン LB3c に 30 mV 定常電流（[Eon Systems][eon] の表と同系統）
 - 密: 全 R1-R6 に輝度 1.0（30·1/1.02 mV）+ ラミナ L1/L2/L3/L5 に 12 mV 恒常
 - 無入力
-- 実時間比 = シミュレーション秒 ÷ 壁時計秒（ロード除く）。Eon の表は FlyWire（~500 万結合）なので参考比較にとどめる
+- 実時間比 = シミュレーション秒 ÷ 壁時計秒（ロード除く）。Eon の表は [FlyWire][flywire]（~500 万結合）なので参考比較にとどめる
 
 ## 事故と対策（2026-09-21 22:32、開発機）
 - RX 580 で `kobae bench --graded` を実行中に GPU がハングし、amdgpu の `ring gfx timeout` → GPU リセット → wgpu-native が panic → デスクトップごと落ちて再起動になった
@@ -110,13 +110,29 @@ DOOM や外部ゲームは接続しない。
 ## 進捗（2026-09-22 00:10）
 - 段階 1 神経コア: 完了。BC-250 で検証合格、糖 3.9× / 視覚 10.6× / 無入力 13.4×
 - ビューア: 完了（BC-250 GPU バックエンド、速度スライダ、体パネル）
-- 段階 3 体: flybody 飛行ポリシーの numpy 実装、指令飛行、閉ループ（両目カメラ → 網膜、DNp20/DNpe017 → 操舵）まで動作
+- 段階 3 体: [flybody][flybody] 飛行ポリシーの numpy 実装、指令飛行、閉ループ（両目カメラ → 網膜、DNp20/DNpe017 → 操舵）まで動作
 - 段階 2 視葉 graded 化: カーネル実装済み・動作するが ~1×（gather が支配的）。検証（CPU 参照なし、LIF 版との挙動差の評価）は未着手
 - 未着手: graded 版の push 型最適化、視覚応答の左右非対称の原因調査、体の視点（動画カメラ）改善、BC-250 での常駐運用（systemd 化とロックの扱い）
 
 ## 進捗（2026-09-22 03:00、締め）
 - ライブ構成: 脳（GPU）と体（運動学モード、目のレンダリングは GPU）を **BC-250 上で lockstep** 動作、開発機は表示のみ。`serve-gpu.sh` + `body/`: `uv run python -m kobae_body.loop --brain ws://127.0.0.1:8765/ws --body kinematic`
-- 体: flybody の飛行ポリシー（numpy）、着地・歩行・離陸の状態機械、壁つきアリーナ（半径 150 cm）と境界アシスト、decoder のベースライン較正（一様光）と 20 s の追従
-- ビューア: three.js の飛行ビュー（リグ 68 体・25 万三角形）、Fable による UI 整理（`a48ecda`）
+- 体: [flybody][flybody] の飛行ポリシー（numpy）、着地・歩行・離陸の状態機械、壁つきアリーナ（半径 150 cm）と境界アシスト、decoder のベースライン較正（一様光）と 20 s の追従
+- ビューア: [three.js][threejs] の飛行ビュー（リグ 68 体・25 万三角形）、Fable による UI 整理（`a48ecda`）
 - 判明したこと: (1) 一様入力でも DNp20 は右が 11 Hz 多い（コネクトームの非対称）。(2) 匂い・糖などで高活動アトラクタに入ると刺激を切っても戻らない（双安定、「リセット」で戻る）。(3) 視覚入力だけでは歩行・着地系の下行ニューロンは沈黙、高活動状態では DNa02 が発火する
-- 未着手: graded 版の検証と高速化、MuJoCo 力学モードでの閉ループ動画、体の物理と脳を同時に実時間で回すこと（力学は 1/13）
+- 未着手: graded 版の検証と高速化、[MuJoCo][mujoco] 力学モードでの閉ループ動画、体の物理と脳を同時に実時間で回すこと（力学は 1/13）
+
+[doomfly]: https://github.com/nftechie/doomfly
+[shiu2024]: https://doi.org/10.1038/s41586-024-07763-9
+[malecns]: https://male-cns.janelia.org/
+[flywire]: https://flywire.ai/
+[eon]: https://github.com/eonsystemspbc/fly-brain
+[flyboard]: https://github.com/NullLabTests/flybrain
+[flybody]: https://github.com/TuragaLab/flybody
+[mujoco]: https://mujoco.org/
+[wgpu]: https://github.com/pygfx/wgpu-py
+[threejs]: https://threejs.org/
+[gfly]: https://github.com/SimonSaysGiveMeSmile/gfly
+[flyexe]: https://github.com/Ibtisam-Mohammad/Fly.exe
+[flyverse]: https://github.com/tel-0s/flyverse-core
+[webgpufly]: https://github.com/abgnydn/webgpu-fly
+[neuromechfly]: https://github.com/NeLy-EPFL/flygym

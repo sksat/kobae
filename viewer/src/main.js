@@ -54,10 +54,18 @@ geom.setAttribute("lastSpike", lastAttr);
 const bbox = new THREE.Box3().setFromBufferAttribute(geom.getAttribute("position"));
 const center = bbox.getCenter(new THREE.Vector3()); controls.target.copy(center);
 const radius = bbox.getBoundingSphere(new THREE.Sphere()).radius;
+window.__view = (elDeg, azDeg) => { OBLIQUE.el = elDeg; OBLIQUE.az = azDeg; view("oblique"); };   // for probes
+const OBLIQUE = { el: 45, az: -30 };
 function view(kind) {
   const vfov = THREE.MathUtils.degToRad(camera.fov / 2);
   const hfov = Math.atan(Math.tan(vfov) * camera.aspect);
   const d = Math.max(radius / Math.sin(vfov), radius / Math.sin(hfov)) * 0.9;
+  // default: from the front, raised and turned a little so the brain, the eyes and the cord read as a 3D object
+  if (kind === "oblique") {
+    const el = THREE.MathUtils.degToRad(OBLIQUE.el), az = THREE.MathUtils.degToRad(OBLIQUE.az);
+    camera.position.set(center.x + d * Math.cos(el) * Math.sin(az), center.y + d * Math.sin(el), center.z + d * Math.cos(el) * Math.cos(az));
+    camera.up.set(0, 1, 0);
+  }
   if (kind === "front") { camera.position.set(center.x, center.y, center.z + d); camera.up.set(0, 1, 0); }
   if (kind === "top")   { camera.position.set(center.x, center.y + d, center.z + 1); camera.up.set(0, 0, -1); }
   if (kind === "side")  { camera.position.set(center.x + d, center.y, center.z); camera.up.set(0, 1, 0); }
@@ -107,7 +115,7 @@ function resize() {
   Object.assign(labelRenderer.domElement.style, { position: "absolute", left: "0px", top: "0px", pointerEvents: "none" });
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-addEventListener("resize", () => { resize(); if (flight) flight.resize(); }); resize(); view("front");
+addEventListener("resize", () => { resize(); if (flight) flight.resize(); }); resize(); view("oblique");
 
 // ---------------------------------------------------------------- ws
 let simMs = 0, rt = 0, sps = 0, frames = 0, lastFpsT = performance.now(), lastAttrUp = 0;

@@ -160,7 +160,9 @@ button.more:hover { color: var(--fg); background: var(--raised); }
 
 #brainminibox { position: relative; height: 240px; border-radius: 4px; overflow: hidden; background: var(--bg); }
 #brainminibox canvas { width: 100% !important; height: 100% !important; }
+#brainmini .sh h3 { white-space: nowrap; }
 #brainmini .sh #views { flex: none; }
+#brainmini .sh #views button { padding: 3px 6px; }   /* four presets must fit beside the heading */
 
 #legend { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; color: var(--dim); }
 #legend > b, #legend > br { display: none; }
