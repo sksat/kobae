@@ -3,6 +3,9 @@
   brain read-outs (descending neurons, Hz) --decode--> Command(speed, yaw, climb)
   body camera (fly's eye view) --luminance at R1-R6 uv--> brain retina (op "retina")
 
+The brain runs in lockstep with the body (op "step"), so brain time == body time. To viewers the
+body process relays 'KOBP' binary frames: pose of every fly body (for the browser rig) + eye images.
+
 Decoder (engineered mapping, same spirit as DoomFly's BCI decoder; not biology):
   yaw   = k_turn * (DNa02_R - DNa02_L)      DNa02 drives ipsilateral turning
   speed = base + k_fwd * DNp09 - k_back * MDN
@@ -82,8 +85,12 @@ class Decoder:
 
 
 async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool, mode: str = "bci",
-              camera: str = "walker/track2", video_fps: int = 30):
-    body = FlightBody(policy, wpg)
+              camera: str = "walker/track2", video_fps: int = 30, body_mode: str = "kinematic", realtime: bool = True):
+    body = FlightBody(policy, wpg, kinematic=(body_mode == "kinematic"))
+    import mujoco
+    m = body.physics.model.ptr
+    walker_ids = [i for i in range(m.nbody) if (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) or "").startswith("walker/")]
+    walker_ids = np.asarray(walker_ids, dtype=np.int64)
 
     import aiohttp
     async with aiohttp.ClientSession() as s:
@@ -115,16 +122,19 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
             p, q = body.body_pose()
             it = int(round(sim_body / STEP_S))
             now = time.perf_counter()
-            if now - last_relay >= 0.2:   # 5 Hz wall-clock relay to the viewer: binary frame, chase camera + both eyes
+            if now - last_relay >= 1 / 20:   # 20 Hz wall-clock relay to the viewer: poses of all fly bodies + both eyes
                 last_relay = now
-                chase = body.render(camera_id=camera, width=480, height=360)
+                poses = body.walker_poses(walker_ids)                      # (n,7) f32
                 eyes = np.concatenate([left, right], axis=1)
-                buf = io.BytesIO(); Image.fromarray(chase).save(buf, format="JPEG", quality=60)
                 ebuf = io.BytesIO(); Image.fromarray(eyes).save(ebuf, format="JPEG", quality=60)
-                jb, eb = buf.getvalue(), ebuf.getvalue()
-                hdr = b"KOBB" + struct.pack("<7fII", sim_body, float(p[0]), float(p[1]), float(p[2]),
-                                            float(2 * np.arctan2(q[3], q[0])), speed, yaw, len(jb), len(eb))
-                await ws.send(hdr + jb + eb)
+                eb = ebuf.getvalue()
+                hdr = b"KOBP" + struct.pack("<7fII", sim_body, float(p[0]), float(p[1]), float(p[2]),
+                                            float(2 * np.arctan2(q[3], q[0])), speed, yaw, len(walker_ids), len(eb))
+                await ws.send(hdr + walker_ids.astype(np.uint16).tobytes() + poses.tobytes() + eb)
+            if realtime:   # live view: do not run the body faster than real time
+                lag = sim_body - (time.perf_counter() - t_start)
+                if lag > 0:
+                    await asyncio.sleep(min(lag, 0.05))
             if video is not None and (sim_body * video_fps) // 1 != ((sim_body - STEP_S) * video_fps) // 1 and len(frames) < 6000:
                 fr = body.render(camera_id=camera, width=640, height=480)
                 # picture-in-picture: the two eyes (what the brain sees) top-left
@@ -153,8 +163,11 @@ def main():
     ap.add_argument("-v", action="store_true")
     ap.add_argument("--mode", choices=["bci", "biological"], default="bci")
     ap.add_argument("--camera", default="walker/track2", help="walker/track1|track2|track3|back|side|hero, top_camera")
+    ap.add_argument("--body", choices=["kinematic", "mujoco"], default="kinematic",
+                    help="kinematic: pose follows the commanded trajectory (real time); mujoco: full flight dynamics (~1/13 real time)")
+    ap.add_argument("--no-realtime", action="store_true", help="run the body as fast as it can (recordings)")
     a = ap.parse_args()
-    asyncio.run(run(a.brain, a.policy, a.wpg, a.seconds, a.video, a.v, a.mode, a.camera))
+    asyncio.run(run(a.brain, a.policy, a.wpg, a.seconds, a.video, a.v, a.mode, a.camera, body_mode=a.body, realtime=not a.no_realtime))
 
 
 if __name__ == "__main__":

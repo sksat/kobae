@@ -115,7 +115,11 @@ class FlightBody:
     """A flying fly whose reference trajectory is extended from ``command`` as time advances."""
 
     def __init__(self, policy_path: str | Path, wpg_pattern_path: str | None = None,
-                 horizon_steps: int = 50, future_steps: int = 5, seed: int = 0, buffer_s: float = 30.0):
+                 horizon_steps: int = 50, future_steps: int = 5, seed: int = 0, buffer_s: float = 30.0,
+                 kinematic: bool = False):
+        """``kinematic``: no dynamics; the fly is placed on the reference trajectory every step and the
+        wings follow the pattern generator. ~100x cheaper than the MuJoCo flight (real-time live view)."""
+        self.kinematic = kinematic
         self.env = flight_imitation(None, wpg_pattern_path, future_steps=future_steps,
                                     terminal_com_dist=float("inf"),
                                     random_state=np.random.RandomState(seed))
@@ -131,6 +135,8 @@ class FlightBody:
         self.buffer_s = buffer_s
         self.relaunches = 0
         self._launch()
+        self._renderer = None
+        self._eye_cams = None
 
     def _launch(self):
         """(Re)start an episode: compiles the model, installs the long reference buffers and the fast hooks."""
@@ -211,6 +217,8 @@ class FlightBody:
     # ---- stepping ---------------------------------------------------------------
     def step(self, n: int = 1):
         """Advance n control steps (0.2 ms each). Returns the last timestep."""
+        if self.kinematic:
+            return self._step_kinematic(n)
         t0 = time.perf_counter()
         for _ in range(n):
             need = self.env.task._step_counter + self.future + 2 + self.horizon
@@ -223,6 +231,25 @@ class FlightBody:
                 self.relaunches += 1
                 self._launch()
             self.t += 1
+        self.wall += time.perf_counter() - t0
+        return self.timestep
+
+    def _step_kinematic(self, n: int):
+        import mujoco
+        t0 = time.perf_counter()
+        task = self.env.task; d = self.physics.data
+        for _ in range(n):
+            k = task._step_counter + 1
+            if self.filled < k + self.future + 2 + self.horizon:
+                self._extend(self.horizon)
+            q = self.ref_qpos[k]
+            d.qpos[self._root_q:self._root_q + 3] = q[:3]; d.qpos[self._root_q + 3:self._root_q + 7] = q[3:]
+            d.qvel[self._root_v:self._root_v + 6] = self.ref_qvel[k]
+            d.qpos[self._wing_q] = task._wbpg.step(ctrl_freq=task._wbpg.base_beat_freq)
+            d.time += CONTROL_DT
+            task._step_counter = k
+            self.t += 1
+        mujoco.mj_forward(self.physics.model.ptr, d.ptr)
         self.wall += time.perf_counter() - t0
         return self.timestep
 
@@ -243,5 +270,18 @@ class FlightBody:
         return self.physics.render(camera_id=camera_id, width=width, height=height)
 
     def eyes(self, width=64, height=48):
-        """(left, right) egocentric eye images."""
-        return tuple(self.physics.render(camera_id=c, width=width, height=height) for c in EYE_CAMERAS)
+        """(left, right) egocentric eye images, via a persistent mujoco.Renderer (4x faster than physics.render)."""
+        import mujoco
+        if self._renderer is None or self._renderer.width != width:
+            self._renderer = mujoco.Renderer(self.physics.model.ptr, height=height, width=width)
+            self._eye_cams = [mujoco.mj_name2id(self.physics.model.ptr, mujoco.mjtObj.mjOBJ_CAMERA, c) for c in EYE_CAMERAS]
+        out = []
+        for c in self._eye_cams:
+            self._renderer.update_scene(self.physics.data.ptr, camera=c)
+            out.append(self._renderer.render().copy())
+        return tuple(out)
+
+    def walker_poses(self, body_ids):
+        """(n,7) world pos+quat of the given body ids (for the browser rig)."""
+        d = self.physics.data
+        return np.concatenate([d.xpos[body_ids], d.xquat[body_ids]], axis=1).astype(np.float32)

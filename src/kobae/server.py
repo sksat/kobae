@@ -242,7 +242,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
         await sock.send_str(json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused, "speed": engine.speed}))
         try:
             async for msg in sock:
-                if msg.type == web.WSMsgType.BINARY and len(msg.data) >= 4 and msg.data[:4] == b"KOBB":
+                if msg.type == web.WSMsgType.BINARY and len(msg.data) >= 4 and msg.data[:4] in (b"KOBB", b"KOBP"):
                     # body process -> subscribed viewers: binary body frame, relayed as-is
                     for c in list(body_subs):
                         if c is not sock:
@@ -330,6 +330,9 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
     app.router.add_get("/ws", ws)
     if static_dir.exists():
         app.router.add_static("/assets", static_dir / "assets")
+    rig_dir = Path(__file__).parent / "viewer" / "rig"
+    if rig_dir.exists():
+        app.router.add_static("/rig", rig_dir)
     return app
 
 
