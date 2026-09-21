@@ -10,6 +10,7 @@ Endpoints
   WS   /ws                    server -> client binary frames; client -> server JSON commands:
                               {op:stim, patch}, {op:speed, value}, {op:pause, value}, {op:reset},
                               {op:retina, lum:[..]} (body -> brain), {op:readouts} -> {op:readouts, rates},
+                              {op:step, ms} (body drives the brain clock in lockstep; reply = readouts),
                               {op:body_sub, value} (viewer wants body frames). Body frames are binary
                               messages starting with 'KOBB' (see body/kobae_body/loop.py) relayed verbatim.
 
@@ -72,6 +73,10 @@ class Engine(threading.Thread):
         self.cell_rate = np.zeros(G.n, np.float32)
         self.fps_cap = fps_cap
         self.speed = 1.0      # target realtime factor; <= 0 means "as fast as possible"
+        # lockstep: a client (the body) drives the clock; the engine advances only on request
+        self.lockstep = False
+        self._req_batches = 0
+        self._req_done = threading.Event()
         self._dirty = True
         self._last_stim_t = -1.0
 
@@ -87,6 +92,8 @@ class Engine(threading.Thread):
         while True:
             if self.paused:
                 time.sleep(0.05); continue
+            if self.lockstep and self._req_batches <= 0:
+                time.sleep(0.001); continue
             t0 = time.perf_counter()
             with self.lock:
                 vis_dyn = self.stim.state.get("visual") in ("flash", "bar", "grating", "loom", "external")
@@ -96,7 +103,9 @@ class Engine(threading.Thread):
                 lum = self.stim.retina_lum.copy()
                 speed = self.speed
             # batches this frame: enough to advance `speed` x realtime during one display frame
-            if speed > 0:
+            if self.lockstep:
+                k = int(min(self._req_batches, MAX_BATCHES_PER_FRAME))
+            elif speed > 0:
                 k = int(np.clip(round(speed * frame_wall * 1000 / BATCH_MS), 1, MAX_BATCHES_PER_FRAME))
             if self.backend == "gpu":
                 b.run(k, sync=True)
@@ -130,9 +139,20 @@ class Engine(threading.Thread):
                 + ids.tobytes() + self.sc_rate.tobytes() + self.ro_rate.tobytes() + lum.astype(np.float32).tobytes()
             if self.loop is not None and self.frames is not None:
                 self.loop.call_soon_threadsafe(self._offer, frame)
+            if self.lockstep:
+                self._req_batches -= k
+                if self._req_batches <= 0:
+                    self._req_done.set()
+                continue
             # do not out-run the display; cap frames/s
             if el < frame_wall:
                 time.sleep(frame_wall - el)
+
+    def request(self, batches: int):
+        """Lockstep: ask for `batches` and return an Event set when they are done."""
+        self._req_done.clear()
+        self._req_batches = int(batches)
+        return self._req_done
 
     def _offer(self, frame):
         q = self.frames
@@ -205,6 +225,7 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
         sock = web.WebSocketResponse(max_msg_size=64 << 20)
         await sock.prepare(request)
         clients.add(sock)
+        lockstep_owner = None
         await sock.send_str(json.dumps({"op": "state", "state": engine.stim.state, "paused": engine.paused, "speed": engine.speed}))
         try:
             async for msg in sock:
@@ -233,6 +254,16 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                     elif cmd.get("op") == "body_sub":
                         body_subs.add(sock) if cmd.get("value", True) else body_subs.discard(sock)
                         continue
+                    elif cmd.get("op") == "step":
+                        # lockstep advance requested by the body: run `ms` of brain time, reply with read-outs
+                        engine.lockstep = True
+                        lockstep_owner = sock
+                        batches = max(1, int(round(float(cmd.get("ms", BATCH_MS)) / BATCH_MS)))
+                        ev = engine.request(batches)
+                        await asyncio.get_running_loop().run_in_executor(None, ev.wait, 30.0)
+                        await sock.send_str(json.dumps({"op": "readouts", "sim_ms": engine.sim_ms,
+                                                        "rates": engine.ro_rate.tolist(), "readouts": engine.readouts}))
+                        continue
                     elif cmd.get("op") == "readouts":
                         await sock.send_str(json.dumps({"op": "readouts", "sim_ms": engine.sim_ms,
                                                         "rates": engine.ro_rate.tolist(), "readouts": engine.readouts}))
@@ -254,6 +285,8 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                         except Exception: pass
         finally:
             clients.discard(sock); body_subs.discard(sock)
+            if lockstep_owner is sock:      # the body went away: free-run again
+                engine.lockstep = False; engine._req_batches = 0; engine._req_done.set()
         return sock
 
     async def broadcaster(app):

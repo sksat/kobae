@@ -84,7 +84,7 @@ class Decoder:
 async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool, mode: str = "bci",
               camera: str = "walker/track2", video_fps: int = 30):
     body = FlightBody(policy, wpg)
-    frame_every = max(1, round(100 / video_fps))   # loop iterations (10 ms of body time) per video frame
+
     import aiohttp
     async with aiohttp.ClientSession() as s:
         meta = await (await s.get(brain.replace("ws://", "http://").replace("wss://", "https://").replace("/ws", "/api/meta"))).json()
@@ -93,27 +93,30 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
     frames = []
     async with websockets.connect(brain, max_size=1 << 26) as ws:
         await ws.send(json.dumps({"op": "stim", "patch": {"visual": "external"}}))
-        t_start = time.perf_counter(); last = t_start; sim_body = 0.0
-        # one loop iteration = 10 ms of body time (50 control steps) ~ 5.5 brain batches
+        t_start = time.perf_counter(); last_relay = 0.0; sim_body = 0.0
+        # one loop iteration = 9 ms of body time (45 control steps) = 5 brain batches, in LOCKSTEP:
+        # the brain advances exactly the body's elapsed time, so brain time == body time
+        STEP_S = 0.009
         while time.perf_counter() - t_start < seconds:
-            body.step(50); sim_body += 0.01
+            body.step(45); sim_body += STEP_S
             left, right = body.eyes(64, 48)
             lum = luminance_from_eyes(left, right, uv)
             rgb = np.concatenate([left, right], axis=1)
             await ws.send(json.dumps({"op": "retina", "lum": lum.round(3).tolist()}))
-            await ws.send(json.dumps({"op": "readouts"}))
-            # drain messages until the readouts reply
-            while True:
+            await ws.send(json.dumps({"op": "step", "ms": STEP_S * 1000}))
+            while True:   # wait for the brain to finish this step (its reply carries the read-outs)
                 msg = await ws.recv()
                 if isinstance(msg, str):
                     m = json.loads(msg)
                     if m.get("op") == "readouts":
-                        dec.update(m["rates"], 0.01); break
+                        dec.update(m["rates"], STEP_S); break
             speed, yaw = dec.command()
             body.command.speed, body.command.yaw = speed, yaw
             p, q = body.body_pose()
-            it = int(round(sim_body * 100))
-            if it % 10 == 0:   # 10 Hz relay to the viewer: binary frame, chase camera + both eyes
+            it = int(round(sim_body / STEP_S))
+            now = time.perf_counter()
+            if now - last_relay >= 0.2:   # 5 Hz wall-clock relay to the viewer: binary frame, chase camera + both eyes
+                last_relay = now
                 chase = body.render(camera_id=camera, width=480, height=360)
                 eyes = np.concatenate([left, right], axis=1)
                 buf = io.BytesIO(); Image.fromarray(chase).save(buf, format="JPEG", quality=60)
@@ -122,18 +125,18 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                 hdr = b"KOBB" + struct.pack("<7fII", sim_body, float(p[0]), float(p[1]), float(p[2]),
                                             float(2 * np.arctan2(q[3], q[0])), speed, yaw, len(jb), len(eb))
                 await ws.send(hdr + jb + eb)
-            if video is not None and it % frame_every == 0 and len(frames) < 6000:
+            if video is not None and (sim_body * video_fps) // 1 != ((sim_body - STEP_S) * video_fps) // 1 and len(frames) < 6000:
                 fr = body.render(camera_id=camera, width=640, height=480)
                 # picture-in-picture: the two eyes (what the brain sees) top-left
                 pip = np.concatenate([left, right], axis=1)
                 pip = np.asarray(Image.fromarray(pip).resize((256, 96)))
                 fr = fr.copy(); fr[8:104, 8:264] = pip
                 frames.append(fr)
-            if verbose and int(sim_body * 100) % 50 == 0:
+            if verbose and it % 56 == 0:
                 p, _ = body.body_pose()
                 print(f"body {sim_body:5.2f}s  pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f} crashes {body.relaunches}  "
                       f"DNp20 L/R {dec.rate('DNp20','L'):.0f}/{dec.rate('DNp20','R'):.0f} DNpe017 {dec.rate('DNpe017'):.0f} "
-                      f"DNa02 L/R {dec.rate('DNa02','L'):.0f}/{dec.rate('DNa02','R'):.0f}  wall/body {(time.perf_counter()-t_start)/sim_body:.1f}x")
+                      f"DNa02 L/R {dec.rate('DNa02','L'):.0f}/{dec.rate('DNa02','R'):.0f}  brain {m['sim_ms']/1000:.2f}s  wall/body {(time.perf_counter()-t_start)/sim_body:.1f}x")
     if video and frames:
         import mediapy
         mediapy.write_video(video, frames, fps=video_fps)   # real-time playback
