@@ -24,6 +24,10 @@ uv run kobae validate --protocol sugar   # GPU と CPU 参照の比較
 uv run kobae serve --backend gpu         # http://<host>:8765 でビューア
 ```
 
+BC-250 では GPU を LLM のベンチと共有しているので、`gpu-run.sh <label> <cmd...>` 経由で動かす:
+llama 系のプロセスと `/tmp/bc250-gpu.lock` が無くなるまで待ってからロックを取り、終了時に外す。
+`serve-gpu.sh`（ビューア）と `gpu-bench.sh`（bench + validate）はその薄いラッパー。
+
 ビューア（`viewer/`）は pnpm プロジェクト。`cd viewer && pnpm install && pnpm build` で `src/kobae/viewer/dist` に出力され、
 Python サーバがそれを配信する。開発時は `pnpm dev`（:5173、API は :8765 にプロキシ）。
 
