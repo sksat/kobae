@@ -16,7 +16,7 @@ AG = math.exp(-DT_MS / TAU_G_MS)
 COUPLING = (AV - AG) / 3.0
 
 # Fixed-point scale for synaptic arrivals accumulated with integer atomics on the GPU.
-G_SCALE = 65536.0
+G_SCALE = 10240.0  # 0.275 mV = 2816 exactly; headroom 2^31/10240 = 209,715 mV vs worst-case 32,982 mV
 
 # Stimulus currents (mV-equivalent), as in DOOMFLY doom/engine.py
 SUGAR_DRIVE = 30.0

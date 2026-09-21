@@ -20,6 +20,16 @@ def main(argv=None):
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--backend", choices=["cpu", "gpu"], default="cpu")
+    b2 = sub.add_parser("bench", help="realtime-factor benchmark")
+    b2.add_argument("--graph", type=Path, default=OUT)
+    b2.add_argument("--backend", choices=["gpu", "cpu", "both"], default="gpu")
+    b2.add_argument("--sim-s", type=float, default=2.0)
+    b2.add_argument("--out", type=Path, default=None)
+    v = sub.add_parser("validate", help="GPU vs CPU reference")
+    v.add_argument("--graph", type=Path, default=OUT)
+    v.add_argument("--protocol", default="sugar")
+    v.add_argument("--total-ms", type=float, default=2520)
+    v.add_argument("--steady-ms", type=float, default=900)
     args = p.parse_args(argv)
     if args.cmd == "build":
         from .graph import build
@@ -27,3 +37,20 @@ def main(argv=None):
     elif args.cmd == "serve":
         from .server import serve
         serve(args.graph, args.host, args.port, args.backend)
+    elif args.cmd == "bench":
+        import json, platform, socket
+        from .graph import Graph
+        from .bench import bench_cpu, bench_gpu
+        G = Graph(args.graph)
+        res = []
+        if args.backend in ("gpu", "both"):
+            res += bench_gpu(G, sim_s=args.sim_s)
+        if args.backend in ("cpu", "both"):
+            res += bench_cpu(G, sim_s=min(args.sim_s, 1.0))
+        if args.out:
+            args.out.write_text(json.dumps({"host": socket.gethostname(), "results": res}, indent=1) + "\n")
+    elif args.cmd == "validate":
+        import json
+        from .graph import Graph
+        from .validate import compare
+        compare(Graph(args.graph), args.protocol, total_ms=args.total_ms, steady_ms=args.steady_ms)

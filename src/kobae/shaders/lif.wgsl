@@ -5,8 +5,10 @@
 // batch needs is already accumulated in gin[s][target] before the batch starts.
 //
 // Per batch, three dispatches:
-//   integrate : one thread per neuron, loops the 18 substeps, appends spikes
-//   prep      : one thread, turns the spike-log head into indirect dispatch args
+//   integrate : one thread per neuron, loops the 18 substeps, appends spikes to
+//               the delivery buffer (capacity n: refractory 22 > delay 18 means a
+//               neuron spikes at most once per batch) and to the observation ring
+//   prep      : one thread, turns the delivery count into indirect dispatch args
 //   scatter   : one workgroup per spike, strides the CSR row with int atomics
 //
 // Semantics follow DOOMFLY doom/engine.py exactly (see cpu.py):
@@ -14,11 +16,15 @@
 //   if refractory==0: v = rest + (v-rest)*av + drive*(1-av) + g*coupling; g*=ag; spike if v>thr
 //   arrivals from t-18 added to g unless refractory>0 (post-decrement)
 //   spikers of this step: v=rest, g=0, refractory=RFC
+//
+// Fixed point: synaptic input is accumulated as i32 in units of 1/G_SCALE mV
+// (10240/mV: 0.275 mV = 2816 exactly). Integer atomics are order-independent,
+// so the arrival sums are bit-reproducible on one device.
 
 struct Params {
   n: u32,
   delay: u32,
-  log_cap: u32,
+  ring_cap: u32,       // observation ring capacity (entries)
   _p0: u32,
   av: f32,
   ag: f32,
@@ -33,16 +39,21 @@ struct Params {
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> ptr: array<u32>;
 @group(0) @binding(2) var<storage, read> post: array<u32>;
-@group(0) @binding(3) var<storage, read> wq: array<i32>;        // fixed-point weights (mV * G_SCALE)
+@group(0) @binding(3) var<storage, read> wq: array<i32>;        // fixed-point weights
 @group(0) @binding(4) var<storage, read_write> v: array<f32>;
 @group(0) @binding(5) var<storage, read_write> g: array<f32>;
 @group(0) @binding(6) var<storage, read_write> refr: array<i32>;
 @group(0) @binding(7) var<storage, read> drive: array<f32>;
 @group(0) @binding(8) var<storage, read_write> gin: array<atomic<i32>>;   // [delay][n]
-@group(0) @binding(9) var<storage, read_write> slog: array<u32>;         // spike log: (neuron<<5)|substep
-// meta: [0]=log head, [1]=batch start, [2]=count, [3]=offset, [4..6]=indirect dispatch args
-@group(0) @binding(10) var<storage, read_write> meta: array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read_write> deliver: array<u32>;      // [n] this batch: (neuron<<5)|substep
+// ctl: [0]=deliver count, [4]=ring head (monotonic), [5]=ring overflow flag, [6]=batch index
+@group(0) @binding(10) var<storage, read_write> ctl: array<atomic<u32>>;
 @group(0) @binding(11) var<storage, read_write> counts: array<u32>;
+// observation ring: (batch, packed) pairs; written by integrate, read + rewound by the host
+@group(0) @binding(12) var<storage, read_write> ring: array<vec2<u32>>;
+// indirect dispatch args for scatter; bound in its own group so it is not a storage
+// binding of the scatter dispatch (wgpu forbids STORAGE_READ_WRITE + INDIRECT in one scope)
+@group(1) @binding(0) var<storage, read_write> indirect: array<u32>;
 
 @compute @workgroup_size(64)
 fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -52,6 +63,7 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
   var gi = g[i];
   var r = refr[i];
   let d = drive[i];
+  let batch = atomicLoad(&ctl[6]);
   var c = 0u;
   for (var s = 0u; s < P.delay; s = s + 1u) {
     if (r > 0) { r = r - 1; }
@@ -62,8 +74,11 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
       if (vi > P.thr) {
         spiked = true;
         c = c + 1u;
-        let idx = atomicAdd(&meta[0], 1u);
-        if (idx < P.log_cap) { slog[idx] = (i << 5u) | s; }
+        let packed = (i << 5u) | s;
+        let k = atomicAdd(&ctl[0], 1u);
+        deliver[k] = packed;                       // k < n is guaranteed (one spike per neuron per batch)
+        let h = atomicAdd(&ctl[4], 1u);
+        if (h < P.ring_cap) { ring[h] = vec2<u32>(batch, packed); } else { atomicStore(&ctl[5], 1u); }
       }
     }
     let a = atomicExchange(&gin[s * P.n + i], 0);
@@ -78,29 +93,29 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(1)
 fn prep() {
-  let head = atomicLoad(&meta[0]);
-  let start = atomicLoad(&meta[1]);
-  let cnt = head - start;
-  atomicStore(&meta[2], cnt);
-  atomicStore(&meta[3], start);
-  atomicStore(&meta[4], min(cnt, 65535u));
-  atomicStore(&meta[5], (cnt + 65534u) / 65535u);
-  atomicStore(&meta[6], 1u);
-  atomicStore(&meta[1], head);
+  let cnt = atomicLoad(&ctl[0]);
+  indirect[0] = min(cnt, 65535u);
+  indirect[1] = (cnt + 65534u) / 65535u;
+  indirect[2] = 1u;
 }
 
 @compute @workgroup_size(64)
 fn scatter(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   let k = wg.y * 65535u + wg.x;
-  let cnt = atomicLoad(&meta[2]);
+  let cnt = atomicLoad(&ctl[0]);
   if (k >= cnt) { return; }
-  let idx = atomicLoad(&meta[3]) + k;
-  if (idx >= P.log_cap) { return; }
-  let packed = slog[idx];
+  let packed = deliver[k];
   let i = packed >> 5u;
   let base = (packed & 31u) * P.n;
   let e1 = ptr[i + 1u];
   for (var e = ptr[i] + lid.x; e < e1; e = e + 64u) {
     atomicAdd(&gin[base + post[e]], wq[e]);
   }
+}
+
+// reset the delivery count after scatter (single thread)
+@compute @workgroup_size(1)
+fn finish() {
+  atomicStore(&ctl[0], 0u);
+  atomicAdd(&ctl[6], 1u);
 }
