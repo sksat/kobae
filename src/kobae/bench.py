@@ -17,6 +17,16 @@ from . import model as M
 from .validate import protocol_drive
 
 
+def cpu_name() -> str:
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine()
+
+
 def graded_mask(G):
     return np.isin(G.superclass, M.GRADED_SUPERCLASSES)
 
@@ -59,7 +69,7 @@ def bench_cpu(G, protocols=("idle", "sugar", "visual"), sim_s: float = 1.0, warm
         counts, _, _ = b.run(steps)
         wall = time.perf_counter() - t
         sim = steps * M.DT_MS / 1000
-        r = {"backend": "cpu-numba", "device": platform.processor() or platform.machine(), "protocol": proto, "sim_s": sim,
+        r = {"backend": "cpu-numba", "device": cpu_name(), "protocol": proto, "sim_s": sim,
              "wall_s": round(wall, 3), "realtime_x": round(sim / wall, 4), "spikes_per_s": int(counts.sum() / sim),
              "active_cells": int((counts > 0).sum())}
         out.append(r)
