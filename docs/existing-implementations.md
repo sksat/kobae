@@ -31,7 +31,7 @@
 | PAIN（257 細胞） | 6.6× | 57k spikes/s |
 | MATE（fru/dsx 3,165 細胞） | 1.2× | 937k spikes/s |
 
-- UI: pygame、3 ペイン（左: 網膜入力、中: 3D 点群、右: 6 ボタン + DRIVE スライダ + 集団メータ + 「誰が光ったか」上位型）。点群は回転/ズーム可、クリックで細胞型表示。スクリーンショット `docs/flyboard-workstation.png`
+- UI: pygame、3 ペイン（左: 網膜入力、中: 3D 点群、右: 6 ボタン + DRIVE スライダ + 集団メータ + 「誰が光ったか」上位型）。点群は回転/ズーム可、クリックで細胞型表示
 - 流用できそうなもの: **presets.yaml のボタン定義**（type_glob / receptorType / fruDsx / 神経伝達物質 glob / 出入神経 でセレクタを書く仕組み）と、soma shard の読み方（neuroglancer + tensorstore）。神経モデルは粗すぎて流用しない
 
 ### DoomFly 参照カーネル（開発機、C++ 単スレッド、DOOM なし）
