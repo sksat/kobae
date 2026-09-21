@@ -128,11 +128,16 @@ class FlightBody:
         self.command = Command()
         self.t = 0
         self.wall = 0.0
-        self.timestep = self.env.reset()          # the only reset: compiles the model
+        self.buffer_s = buffer_s
+        self.relaunches = 0
+        self._launch()
+
+    def _launch(self):
+        """(Re)start an episode: compiles the model, installs the long reference buffers and the fast hooks."""
+        self.timestep = self.env.reset()
         task = self.env.task
         task._traj_timesteps = 1 << 30            # never "reach the end" of the reference
-        # long reference buffers (root frame), seeded with the row the reset used
-        n = int(buffer_s / CONTROL_DT)
+        n = int(self.buffer_s / CONTROL_DT)
         self.ref_qpos = np.zeros((n, 7)); self.ref_qvel = np.zeros((n, 6))
         self.ref_qpos[0] = task._ref_qpos[0]; self.ref_qvel[0] = task._ref_qvel[0]
         self.filled = 1
@@ -214,8 +219,9 @@ class FlightBody:
             obs = flatten_obs(self.timestep.observation)
             a = self.policy(obs)
             self.timestep = self.env.step(canonical_to_real(a, self.spec))
-            if self.timestep.last():   # fell below the terminal height etc.: relaunch from the reference
-                self.timestep = self.env.reset()
+            if self.timestep.last():   # crashed (below the terminal height): relaunch a fresh episode
+                self.relaunches += 1
+                self._launch()
             self.t += 1
         self.wall += time.perf_counter() - t0
         return self.timestep

@@ -73,8 +73,9 @@ class Decoder:
     def command(self):
         if self.mode == "bci":
             # DNp20 projects ipsilaterally; stronger right -> turn right (negative yaw)
-            yaw = float(np.clip((self.rate("DNp20", "L") - self.rate("DNp20", "R")) * self.k_turn, -6, 6))
-            speed = float(np.clip(self.base + self.rate("DNpe017") * self.k_fwd, 2, 40))
+            # kept inside the imitation policy's envelope (it was trained on real flight: <= ~30 cm/s)
+            yaw = float(np.clip((self.rate("DNp20", "L") - self.rate("DNp20", "R")) * self.k_turn, -3, 3))
+            speed = float(np.clip(self.base + self.rate("DNpe017") * self.k_fwd, 5, 25))
         else:
             yaw = float(np.clip((self.rate("DNa02", "R") - self.rate("DNa02", "L")) * self.k_turn, -6, 6))
             speed = float(np.clip(self.base + self.rate("DNp09") * self.k_fwd - self.rate("MDN") * self.k_back, 2, 40))
@@ -131,7 +132,7 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                 frames.append(fr)
             if verbose and int(sim_body * 100) % 50 == 0:
                 p, _ = body.body_pose()
-                print(f"body {sim_body:5.2f}s  pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f}  "
+                print(f"body {sim_body:5.2f}s  pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f} crashes {body.relaunches}  "
                       f"DNp20 L/R {dec.rate('DNp20','L'):.0f}/{dec.rate('DNp20','R'):.0f} DNpe017 {dec.rate('DNpe017'):.0f} "
                       f"DNa02 L/R {dec.rate('DNa02','L'):.0f}/{dec.rate('DNa02','R'):.0f}  wall/body {(time.perf_counter()-t_start)/sim_body:.1f}x")
     if video and frames:
