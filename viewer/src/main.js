@@ -119,7 +119,12 @@ let ws;
 function connect() {
   ws = new WebSocket(wsUrl); ws.binaryType = "arraybuffer";
   ws.onmessage = (ev) => {
-    if (typeof ev.data === "string") { const m = JSON.parse(ev.data); if (m.op === "state") { syncUI(m.state, m.paused); if (m.speed !== undefined) setSpeedUI(m.speed); } return; }
+    if (typeof ev.data === "string") {
+      const m = JSON.parse(ev.data);
+      if (m.op === "state") { syncUI(m.state, m.paused); if (m.speed !== undefined) setSpeedUI(m.speed); }
+      else if (m.op === "body") onBody(m);
+      return;
+    }
     const dv = new DataView(ev.data);
     if (dv.getUint32(0, true) !== MAGIC) return;
     simMs = dv.getFloat32(4, true); rt = dv.getFloat32(8, true);
@@ -249,6 +254,28 @@ canvas.addEventListener("pointerup", async (e) => {
   $("#cellinfo").innerHTML = `<b>${c.type || "(型なし)"}</b> ${c.side === "L" ? "左" : c.side === "R" ? "右" : ""} · ${scJa(c.superclass)}<br>bodyId ${c.bodyId} · 伝達物質 ${c.nt || "不明"}（${c.sign > 0 ? "興奮性 +" : "抑制性 −"}）<br>出力先 ${c.out_degree} 細胞 · 入力元 ${c.in_degree} 細胞 · いま ${c.rate_hz.toFixed(1)} Hz · 位置は${c.measured_soma ? "実測" : "推定"}`;
   rasterSet = new Map([[best, 0]]); rasterLabel = c.type || String(best); raster.length = 0;
 });
+
+// body (flybody) relay
+const path = [];
+function onBody(m) {
+  const sec = $("#bodysec"); if (sec.hidden) sec.hidden = false;
+  if (m.jpeg) $("#bodycam").src = "data:image/jpeg;base64," + m.jpeg;
+  if (m.pos) { path.push(m.pos[0], m.pos[1]); while (path.length > 4000) path.splice(0, 2); }
+  const c = $("#bodypath").getContext("2d"); c.fillStyle = "#000"; c.fillRect(0, 0, 360, 200);
+  if (path.length >= 4) {
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+    for (let i = 0; i < path.length; i += 2) { minx = Math.min(minx, path[i]); maxx = Math.max(maxx, path[i]); miny = Math.min(miny, path[i+1]); maxy = Math.max(maxy, path[i+1]); }
+    const span = Math.max(maxx - minx, maxy - miny, 2), sx = 340 / span, ox = (minx + maxx) / 2, oy = (miny + maxy) / 2;
+    c.strokeStyle = "#7cc7ff"; c.beginPath();
+    for (let i = 0; i < path.length; i += 2) { const x = 180 + (path[i] - ox) * sx, y = 100 - (path[i+1] - oy) * sx; i ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.stroke();
+    const x = 180 + (m.pos[0] - ox) * sx, y = 100 - (m.pos[1] - oy) * sx;
+    c.fillStyle = "#ffe36b"; c.beginPath(); c.arc(x, y, 4, 0, 6.283); c.fill();
+    if (m.yaw !== undefined) { c.strokeStyle = "#ffe36b"; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 12 * Math.cos(m.yaw), y - 12 * Math.sin(m.yaw)); c.stroke(); }
+    c.fillStyle = "#8a93a3"; c.font = "10px ui-monospace"; c.fillText(`${span.toFixed(0)} cm`, 6, 194);
+  }
+  if (m.cmd) $("#bodyinfo").textContent = `体の時間 ${(m.t ?? 0).toFixed(2)} s · 指令: 前進 ${m.cmd[0].toFixed(1)} cm/s, 旋回 ${m.cmd[1].toFixed(2)} rad/s`;
+}
 
 // ---------------------------------------------------------------- loop
 function tick() {

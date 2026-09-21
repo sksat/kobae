@@ -18,8 +18,12 @@ import json
 import struct
 import time
 
+import base64
+import io
+
 import numpy as np
 import websockets
+from PIL import Image
 
 from .flight import FlightBody
 
@@ -83,6 +87,12 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
                         dec.update(m["rates"], 0.01); break
             speed, yaw = dec.command()
             body.command.speed, body.command.yaw = speed, yaw
+            p, q = body.body_pose()
+            if int(round(sim_body * 100)) % 5 == 0:   # 20 Hz relay to the viewer
+                buf = io.BytesIO(); Image.fromarray(rgb).save(buf, format="JPEG", quality=70)
+                await ws.send(json.dumps({"op": "body", "jpeg": base64.b64encode(buf.getvalue()).decode(),
+                                          "pos": [float(p[0]), float(p[1]), float(p[2])],
+                                          "yaw": float(2 * np.arctan2(q[3], q[0])), "cmd": [speed, yaw], "t": sim_body}))
             if video is not None and len(frames) < 3000:
                 frames.append(body.render(camera_id=1, width=320, height=240))
             if verbose and int(sim_body * 100) % 50 == 0:

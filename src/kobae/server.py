@@ -220,6 +220,15 @@ def make_app(G: Graph, engine: Engine, static_dir: Path) -> web.Application:
                                 engine.stim.state["visual"] = "external"
                                 engine._dirty = True
                         continue
+                    elif cmd.get("op") == "body":
+                        # body process -> viewers: camera jpeg (base64) + pose; relayed as-is
+                        relay = json.dumps({"op": "body", "jpeg": cmd.get("jpeg"), "pos": cmd.get("pos"),
+                                            "yaw": cmd.get("yaw"), "cmd": cmd.get("cmd"), "t": cmd.get("t")})
+                        for c in list(clients):
+                            if c is not sock:
+                                try: await c.send_str(relay)
+                                except Exception: pass
+                        continue
                     elif cmd.get("op") == "readouts":
                         await sock.send_str(json.dumps({"op": "readouts", "sim_ms": engine.sim_ms,
                                                         "rates": engine.ro_rate.tolist(), "readouts": engine.readouts}))

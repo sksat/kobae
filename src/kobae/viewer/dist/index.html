@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kobae — MaleCNS v1.0 live</title>
-  <script type="module" crossorigin src="/assets/index-CFUtpdUd.js"></script>
+  <script type="module" crossorigin src="/assets/index-CH3Zr-1B.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-o5z_JSDd.css">
 </head>
 <body>
@@ -62,6 +62,12 @@
     <section>
       <h3>発火の時系列 <span class="dim" id="rasterinfo"></span></h3><div class="dim">横軸 = 直近 2 秒、縦 = 細胞 1 つずつ。点 1 つが発火 1 回。</div>
       <canvas id="raster" width="360" height="160"></canvas>
+    </section>
+    <section id="bodysec" hidden>
+      <h3>体（flybody / MuJoCo）</h3><div class="dim">ハエの目のカメラ（脳の網膜に入っている映像）と、上から見た飛行経路。</div>
+      <img id="bodycam" alt="fly camera" style="width:100%;border-radius:4px;background:#000">
+      <canvas id="bodypath" width="360" height="200"></canvas>
+      <div class="dim" id="bodyinfo"></div>
     </section>
     <section id="cellinfo" class="dim">点群の細胞をクリックすると、その細胞の情報がここに出ます</section>
     <section id="legend" class="dim"></section>
