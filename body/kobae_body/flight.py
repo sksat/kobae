@@ -28,6 +28,25 @@ from flybody.fly_envs import flight_imitation
 from flybody.quaternions import mult_quat
 
 CONTROL_DT = 2e-4  # flybody flight control timestep, s (matches _FLY_CONTROL_TIMESTEP)
+EYE_CAMERAS = ("walker/eye_left", "walker/eye_right")
+
+
+def add_scenery(arena_mjcf, seed: int = 0, n_pillars: int = 40, radius: float = 150.0):
+    """Dark pillars and a bright far wall so the fly's eyes see structure (flybody's arena is a bare floor)."""
+    rng = np.random.default_rng(seed)
+    wb = arena_mjcf.worldbody
+    for k in range(n_pillars):
+        r = rng.uniform(15, radius); a = rng.uniform(0, 2 * np.pi)
+        h = rng.uniform(4, 14)
+        wb.add("geom", name=f"pillar{k}", type="cylinder", size=[rng.uniform(0.6, 2.0), h],
+               pos=[r * np.cos(a), r * np.sin(a), h], rgba=[0.05, 0.05, 0.08, 1], contype=0, conaffinity=0)
+    # a checker "horizon" wall far away for optic flow
+    for k in range(24):
+        a = 2 * np.pi * k / 24
+        c = 0.9 if k % 2 == 0 else 0.15
+        wb.add("geom", name=f"wall{k}", type="box", size=[radius * 0.13, 0.5, 30],
+               pos=[radius * np.cos(a), radius * np.sin(a), 30], euler=[0, 0, np.degrees(a) + 90],
+               rgba=[c, c, c, 1], contype=0, conaffinity=0)
 
 
 class NumpyPolicy:
@@ -82,6 +101,7 @@ class FlightBody:
                                     terminal_com_dist=float("inf"),
                                     random_state=np.random.RandomState(seed))
         self.env._time_limit = float("inf")
+        add_scenery(self.env.task._arena.mjcf_model, seed=seed)
         self.policy = NumpyPolicy(policy_path)
         self.spec = self.env.action_spec()
         self.horizon = horizon_steps
@@ -99,7 +119,19 @@ class FlightBody:
         self.filled = 1
         task._ref_qpos = self.ref_qpos; task._ref_qvel = self.ref_qvel
         self._patch_before_step()
+        self._hide_helpers()
         self._extend(self.horizon + self.future + 2)
+
+    def _hide_helpers(self):
+        """The ghost fly, trajectory dots and crosshair are visualisation aids: keep them out of the eyes."""
+        import mujoco
+        m = self.physics.model
+        for i in range(m.ngeom):
+            name = mujoco.mj_id2name(m.ptr, mujoco.mjtObj.mjOBJ_GEOM, i) or ""
+            if name.startswith("ghost"):
+                m.geom_rgba[i, 3] = 0.0
+        for i in range(m.nsite):
+            m.site_rgba[i, 3] = 0.0
 
     # ---- reference trajectory -------------------------------------------------
     def _extend(self, n: int):
@@ -184,3 +216,7 @@ class FlightBody:
 
     def render(self, camera_id=1, width=320, height=240):
         return self.physics.render(camera_id=camera_id, width=width, height=height)
+
+    def eyes(self, width=64, height=48):
+        """(left, right) egocentric eye images."""
+        return tuple(self.physics.render(camera_id=c, width=width, height=height) for c in EYE_CAMERAS)

@@ -30,19 +30,35 @@ from .flight import FlightBody
 MAGIC = 0x4B4F4241
 
 
-def luminance_from_frame(rgb: np.ndarray, uv: np.ndarray, fov_split: float = 0.6) -> np.ndarray:
-    """Sample a camera frame at each photoreceptor's uv (left 60 % / right 60 % overlap, DoomFly convention)."""
-    h, w, _ = rgb.shape
-    gray = rgb[..., :3].astype(np.float32).mean(-1) / 255.0
-    gray = gray ** 2.2  # sRGB -> linear-ish
-    x = np.clip((uv[:, 0] * (w - 1)).astype(int), 0, w - 1)
-    y = np.clip((uv[:, 1] * (h - 1)).astype(int), 0, h - 1)
-    return gray[y, x]
+def luminance_from_eyes(left: np.ndarray, right: np.ndarray, uv: np.ndarray) -> np.ndarray:
+    """Sample the two eye images at each photoreceptor's uv.
+
+    The uv map (DoomFly) puts the left eye's columns in x in [0, 0.6] and the right eye's in
+    [0.4, 1.0]; each is stretched over its own eye camera image."""
+    def gray(rgb):
+        g = rgb[..., :3].astype(np.float32).mean(-1) / 255.0
+        return g ** 2.2  # sRGB -> linear
+    gl, gr = gray(left), gray(right)
+    h, w = gl.shape
+    out = np.zeros(len(uv), np.float32)
+    x, y = uv[:, 0], uv[:, 1]
+    L = x < 0.5
+    xl = np.clip((x[L] / 0.6 * (w - 1)).astype(int), 0, w - 1); yl = np.clip((y[L] * (h - 1)).astype(int), 0, h - 1)
+    out[L] = gl[yl, xl]
+    R = ~L
+    xr = np.clip(((x[R] - 0.4) / 0.6 * (w - 1)).astype(int), 0, w - 1); yr = np.clip((y[R] * (h - 1)).astype(int), 0, h - 1)
+    out[R] = gr[yr, xr]
+    return out
 
 
 class Decoder:
-    def __init__(self, readouts: list[dict], k_turn=0.06, k_fwd=0.3, k_back=0.3, base_speed=15.0, tau=0.1):
+    """Two read-out modes, both engineered mappings (DoomFly's decoders):
+    biological: DNa02 R-L -> turn, DNp09 -> forward, MDN -> backward (silent under pure visual input)
+    bci       : DNp20 R-L -> turn, DNpe017 -> forward (visual descending neurons; the default here)"""
+
+    def __init__(self, readouts: list[dict], mode="bci", k_turn=0.12, k_fwd=0.4, k_back=0.3, base_speed=12.0, tau=0.1):
         self.readouts = readouts
+        self.mode = mode
         self.k_turn, self.k_fwd, self.k_back, self.base = k_turn, k_fwd, k_back, base_speed
         self.tau = tau
         self.rates = np.zeros(len(readouts))
@@ -55,18 +71,23 @@ class Decoder:
         return sum(r for r, ro in zip(self.rates, self.readouts) if ro["type"] == typ and (side is None or ro["side"] == side))
 
     def command(self):
-        yaw = float(np.clip((self.rate("DNa02", "R") - self.rate("DNa02", "L")) * self.k_turn, -6, 6))
-        speed = float(np.clip(self.base + self.rate("DNp09") * self.k_fwd - self.rate("MDN") * self.k_back, 2, 40))
+        if self.mode == "bci":
+            # DNp20 projects ipsilaterally; stronger right -> turn right (negative yaw)
+            yaw = float(np.clip((self.rate("DNp20", "L") - self.rate("DNp20", "R")) * self.k_turn, -6, 6))
+            speed = float(np.clip(self.base + self.rate("DNpe017") * self.k_fwd, 2, 40))
+        else:
+            yaw = float(np.clip((self.rate("DNa02", "R") - self.rate("DNa02", "L")) * self.k_turn, -6, 6))
+            speed = float(np.clip(self.base + self.rate("DNp09") * self.k_fwd - self.rate("MDN") * self.k_back, 2, 40))
         return speed, yaw
 
 
-async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool):
+async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: str | None, verbose: bool, mode: str = "bci"):
     body = FlightBody(policy, wpg)
     import aiohttp
     async with aiohttp.ClientSession() as s:
         meta = await (await s.get(brain.replace("ws://", "http://").replace("wss://", "https://").replace("/ws", "/api/meta"))).json()
     uv = np.asarray(meta["uv"], np.float32).reshape(-1, 2)
-    dec = Decoder(meta["readouts"])
+    dec = Decoder(meta["readouts"], mode=mode)
     frames = []
     async with websockets.connect(brain, max_size=1 << 26) as ws:
         await ws.send(json.dumps({"op": "stim", "patch": {"visual": "external"}}))
@@ -74,8 +95,9 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
         # one loop iteration = 10 ms of body time (50 control steps) ~ 5.5 brain batches
         while time.perf_counter() - t_start < seconds:
             body.step(50); sim_body += 0.01
-            rgb = body.render(camera_id=1, width=160, height=120)
-            lum = luminance_from_frame(rgb, uv)
+            left, right = body.eyes(64, 48)
+            lum = luminance_from_eyes(left, right, uv)
+            rgb = np.concatenate([left, right], axis=1)
             await ws.send(json.dumps({"op": "retina", "lum": lum.round(3).tolist()}))
             await ws.send(json.dumps({"op": "readouts"}))
             # drain messages until the readouts reply
@@ -98,6 +120,7 @@ async def run(brain: str, policy: str, wpg: str | None, seconds: float, video: s
             if verbose and int(sim_body * 100) % 50 == 0:
                 p, _ = body.body_pose()
                 print(f"body {sim_body:5.2f}s  pos {p.round(2)}  cmd speed {speed:5.1f} yaw {yaw:+5.2f}  "
+                      f"DNp20 L/R {dec.rate('DNp20','L'):.0f}/{dec.rate('DNp20','R'):.0f} DNpe017 {dec.rate('DNpe017'):.0f} "
                       f"DNa02 L/R {dec.rate('DNa02','L'):.0f}/{dec.rate('DNa02','R'):.0f}  wall/body {(time.perf_counter()-t_start)/sim_body:.1f}x")
     if video and frames:
         import mediapy
@@ -113,8 +136,9 @@ def main():
     ap.add_argument("--seconds", type=float, default=20.0)
     ap.add_argument("--video", default=None)
     ap.add_argument("-v", action="store_true")
+    ap.add_argument("--mode", choices=["bci", "biological"], default="bci")
     a = ap.parse_args()
-    asyncio.run(run(a.brain, a.policy, a.wpg, a.seconds, a.video, a.v))
+    asyncio.run(run(a.brain, a.policy, a.wpg, a.seconds, a.video, a.v, a.mode))
 
 
 if __name__ == "__main__":
